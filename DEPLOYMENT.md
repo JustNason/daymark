@@ -32,4 +32,6 @@ Run `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:e2e`. Wi
 
 Required for the app: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Required only for notification cron: `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`.
 
-Optional server-only: `SCHOOLOGY_CONSUMER_KEY`, `SCHOOLOGY_CONSUMER_SECRET`, `SCHOOLOGY_CALLBACK_URL`, `INTEGRATION_ENCRYPTION_KEY`, `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL`, `DISCORD_BOT_TOKEN`, `DISCORD_APPLICATION_ID`, `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM`, `CRON_SECRET`. The VAPID public key is also exposed as `NEXT_PUBLIC_VAPID_PUBLIC_KEY` to allow browser subscription; it is not a secret.
+For Vercel Dashboard setup instructions, secret handling, and optional provider variables, see [VERCEL_ENVIRONMENT_SETUP.md](VERCEL_ENVIRONMENT_SETUP.md).
+
+Optional server-only: `SCHOOLOGY_CONSUMER_KEY`, `SCHOOLOGY_CONSUMER_SECRET`, `SCHOOLOGY_CALLBACK_URL`, `INTEGRATION_ENCRYPTION_KEY`, `AI_BASE_URL`, `AI_API_KEY`, `AI_MODEL`, `DISCORD_BOT_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `DISCORD_APPLICATION_ID`, `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `EMAIL_PROVIDER`, `EMAIL_API_KEY`, `EMAIL_FROM`, `CRON_SECRET`. The VAPID public key is also exposed as `NEXT_PUBLIC_VAPID_PUBLIC_KEY` to allow browser subscription; it is not a secret. For Discord account linking, register the exact `/api/integrations/discord/callback` URL in the Discord OAuth2 application settings.

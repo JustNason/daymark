@@ -41,6 +41,7 @@ supabase/migrations/     PostgreSQL schema, constraints, indexes, RLS
 tests/                   Unit and end-to-end tests
 README.md                Project and local start guide
 DEPLOYMENT.md            Supabase/Vercel setup
+VERCEL_ENVIRONMENT_SETUP.md Vercel environment variables by feature
 ARCHITECTURE.md          System boundaries and data flow
 DATABASE.md              Tables, indexes, ownership rules
 INTEGRATIONS.md          Provider configuration and limitations

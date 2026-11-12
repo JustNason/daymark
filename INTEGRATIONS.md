@@ -14,7 +14,7 @@ Ollama can run locally. For OpenAI-compatible inference set `AI_BASE_URL`, `AI_A
 
 ## Discord
 
-Create an application/bot in the Discord developer portal, grant only the required bot access, and store `DISCORD_BOT_TOKEN` server-side. Users must opt in and provide an allowed delivery destination. Direct-message delivery may require the recipient to start/allow the bot; delivery failures are logged. A bot cannot be tested without a configured Discord application and recipient.
+Create an application/bot in the Discord developer portal and store `DISCORD_BOT_TOKEN` server-side. To let users link their Discord identity, configure `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, and `DISCORD_REDIRECT_URI` for that OAuth2 application. Register the redirect URI exactly as `https://<your-domain>/api/integrations/discord/callback` (use the localhost equivalent for development). Daymark requests only the `identify` scope and does not request server permissions. Users link or unlink from Notifications settings; their Discord ID is fetched through OAuth and saved to their own notification preferences. Bot DMs still require the bot token, and Discord may block messages based on the user's privacy settings or bot relationship. A test button reports delivery errors. These credentials are optional; in-app reminders and the rest of Daymark work without them.
 
 ## Browser push
 

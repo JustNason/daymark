@@ -203,6 +203,23 @@ export default function Workspace() {
     });
     return () => subscription.unsubscribe();
   }, [reload, router, supabase]);
+  useEffect(() => {
+    const linkResult = new URLSearchParams(window.location.search).get(
+      "discord_link",
+    );
+    if (!linkResult) return;
+    setSection("Notifications");
+    setToast(
+      linkResult === "connected"
+        ? "Discord account linked"
+        : linkResult === "not_configured"
+          ? "Discord account linking needs OAuth credentials in Vercel"
+          : linkResult === "cancelled"
+            ? "Discord account linking was cancelled"
+            : "Could not link Discord account",
+    );
+    router.replace("/app");
+  }, [router]);
   async function createTask(title: string, extra: Partial<Task> = {}) {
     if (!supabase) return;
     const {
@@ -2134,8 +2151,16 @@ function NotificationPreferences() {
     weekly_summary: false,
   });
   const [message, setMessage] = useState("");
+  const [testingDiscord, setTestingDiscord] = useState(false);
+  const [discordLinked, setDiscordLinked] = useState(false);
   useEffect(() => {
     const c = createClient();
+    fetch("/api/integrations/discord")
+      .then((response) => response.json())
+      .then((result: { connected?: boolean }) =>
+        setDiscordLinked(result.connected === true),
+      )
+      .catch(() => setDiscordLinked(false));
     c?.from("notification_preferences")
       .select("*")
       .maybeSingle()
@@ -2152,7 +2177,10 @@ function NotificationPreferences() {
   }, []);
   async function save() {
     const c = createClient();
-    if (!c) return;
+    if (!c) {
+      setMessage("Supabase is not configured.");
+      return false;
+    }
     const { data } = await c.auth.getUser();
     const { error } = await c.from("notification_preferences").upsert({
       ...value,
@@ -2162,6 +2190,48 @@ function NotificationPreferences() {
       quiet_end: value.quiet_end || null,
     });
     setMessage(error ? error.message : "Notification preferences saved.");
+    return !error;
+  }
+  async function testDiscord() {
+    setTestingDiscord(true);
+    setMessage("");
+    try {
+      if (!(await save())) return;
+      const response = await fetch("/api/notifications/discord-test", {
+        method: "POST",
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+      };
+      setMessage(
+        response.ok && result.ok
+          ? "Test Discord notification sent. Check your DMs."
+          : result.error || "Could not send the Discord test notification.",
+      );
+    } catch {
+      setMessage("Could not send the Discord test notification. Try again.");
+    } finally {
+      setTestingDiscord(false);
+    }
+  }
+  async function unlinkDiscord() {
+    setMessage("");
+    try {
+      const response = await fetch("/api/integrations/discord", {
+        method: "DELETE",
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setMessage(result.error || "Could not unlink Discord.");
+        return;
+      }
+      setValue((v) => ({ ...v, discord_user_id: "", discord_enabled: false }));
+      setDiscordLinked(false);
+      setMessage("Discord account unlinked.");
+    } catch {
+      setMessage("Could not unlink Discord. Please try again.");
+    }
   }
   async function subscribePush() {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
@@ -2315,18 +2385,36 @@ function NotificationPreferences() {
         </label>
       </div>
       <div className="preference-footer">
-        <label>
-          Discord user ID
-          <input
-            value={value.discord_user_id}
-            onChange={(e) =>
-              setValue((v) => ({ ...v, discord_user_id: e.target.value }))
-            }
-            placeholder="Required for bot DMs"
-          />
-        </label>
+        <div className="discord-link-status">
+          <span className="muted">
+            {discordLinked
+              ? "Discord account linked"
+              : "No Discord account linked"}
+          </span>
+          <a
+            className="button subtle small-button"
+            href="/api/integrations/discord/connect"
+          >
+            {discordLinked ? "Reconnect Discord" : "Link Discord account"}
+          </a>
+          {discordLinked && (
+            <button
+              className="button subtle small-button"
+              onClick={unlinkDiscord}
+            >
+              Unlink
+            </button>
+          )}
+        </div>
         <button className="button subtle small-button" onClick={subscribePush}>
           Enable browser push
+        </button>
+        <button
+          className="button subtle small-button"
+          onClick={testDiscord}
+          disabled={testingDiscord}
+        >
+          {testingDiscord ? "Sending test…" : "Test Discord notification"}
         </button>
         <span className="muted">
           Email delivery requires a configured provider and may be quota
@@ -2594,16 +2682,14 @@ function SettingsView({
     const {
       data: { user: u },
     } = await c!.auth.getUser();
-    const { error } = await c!
-      .from("user_preferences")
-      .upsert({
-        user_id: u?.id,
-        theme,
-        timezone,
-        workday_start: workdayStart,
-        workday_end: workdayEnd,
-        week_starts_on: weekStartsOn,
-      });
+    const { error } = await c!.from("user_preferences").upsert({
+      user_id: u?.id,
+      theme,
+      timezone,
+      workday_start: workdayStart,
+      workday_end: workdayEnd,
+      week_starts_on: weekStartsOn,
+    });
     const profileResult = await c!
       .from("profiles")
       .update({ display_name: displayName })
