@@ -16,7 +16,15 @@ function returnToApp(request: Request, result: string) {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const cookieStore = await cookies();
-  const expectedState = cookieStore.get("daymark_discord_oauth_state")?.value;
+  const rawState = cookieStore.get("daymark_discord_oauth_state")?.value;
+  let flow: { state: string; userId: string } | null = null;
+  try {
+    flow = rawState
+      ? JSON.parse(Buffer.from(rawState, "base64url").toString("utf8"))
+      : null;
+  } catch {
+    flow = null;
+  }
   const state = url.searchParams.get("state");
   const code = url.searchParams.get("code");
   const response = returnToApp(
@@ -24,8 +32,7 @@ export async function GET(request: Request) {
     url.searchParams.get("error") ? "cancelled" : "failed",
   );
 
-  if (!expectedState || !state || state !== expectedState || !code)
-    return response;
+  if (!flow || !state || state !== flow.state || !code) return response;
 
   const clientId = process.env.DISCORD_CLIENT_ID;
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
@@ -38,7 +45,15 @@ export async function GET(request: Request) {
   const {
     data: { user },
   } = (await supabase?.auth.getUser()) || { data: { user: null } };
-  if (!supabase || !user) return NextResponse.redirect(new URL("/login", url));
+  if (!supabase || !user) {
+    const login = NextResponse.redirect(new URL("/login", url));
+    login.cookies.set("daymark_discord_oauth_state", "", {
+      path: "/api/integrations/discord",
+      maxAge: 0,
+    });
+    return login;
+  }
+  if (user.id !== flow.userId) return returnToApp(request, "failed");
 
   try {
     const tokenResponse = await fetch(

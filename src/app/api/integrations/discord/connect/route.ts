@@ -28,7 +28,10 @@ export async function GET(request: Request) {
   authorize.searchParams.set("state", state);
 
   const response = NextResponse.redirect(authorize);
-  response.cookies.set("daymark_discord_oauth_state", state, {
+  const cookiePayload = Buffer.from(
+    JSON.stringify({ state, userId: user.id }),
+  ).toString("base64url");
+  response.cookies.set("daymark_discord_oauth_state", cookiePayload, {
     httpOnly: true,
     secure: new URL(request.url).protocol === "https:",
     sameSite: "lax",
