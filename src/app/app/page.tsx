@@ -1,0 +1,2850 @@
+"use client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
+import {
+  format,
+  addDays,
+  startOfWeek,
+  startOfMonth,
+  eachDayOfInterval,
+  isSameDay,
+  isSameMonth,
+} from "date-fns";
+import {
+  Activity,
+  AlarmClock,
+  ArrowRight,
+  Bell,
+  BookOpen,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Command,
+  FolderKanban,
+  GraduationCap,
+  LayoutDashboard,
+  ListTodo,
+  LogOut,
+  Menu,
+  Moon,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Settings2,
+  Sparkles,
+  Sun,
+  Trash2,
+  X,
+} from "lucide-react";
+
+type Section =
+  | "Overview"
+  | "Calendar"
+  | "My Tasks"
+  | "Projects"
+  | "Courses"
+  | "Assignments"
+  | "AI Planner"
+  | "Notifications"
+  | "Settings";
+type Task = {
+  id: string;
+  title: string;
+  description: string;
+  status: string;
+  priority: string;
+  due_at: string | null;
+  estimated_minutes: number | null;
+  project_id: string | null;
+  assignment_id?: string | null;
+  created_at: string;
+};
+type Project = {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  status: string;
+  target_date: string | null;
+};
+type Course = {
+  id: string;
+  name: string;
+  selected: boolean;
+  auto_import: boolean;
+  external_id: string | null;
+  section_external_id: string | null;
+};
+type Event = {
+  id: string;
+  title: string;
+  starts_at: string;
+  ends_at: string;
+  color: string;
+  category: string;
+  description: string;
+};
+type Assignment = {
+  id: string;
+  title: string;
+  description: string;
+  personal_title?: string | null;
+  personal_description?: string | null;
+  original_due_at: string | null;
+  personal_due_at: string | null;
+  personal_completed: boolean | null;
+  original_completed: boolean | null;
+  course_id: string | null;
+  url: string | null;
+};
+type Proposal = {
+  id: string;
+  slots: { taskId: string; title: string; start: Date; end: Date }[];
+  explanation?: string;
+};
+const nav: { title: string; items: Section[] }[] = [
+  {
+    title: "WORKSPACE",
+    items: ["Overview", "Calendar", "My Tasks", "Projects"],
+  },
+  { title: "ACADEMICS", items: ["Courses", "Assignments"] },
+  { title: "TOOLS", items: ["AI Planner", "Notifications", "Settings"] },
+];
+const icons: Record<Section, React.ElementType> = {
+  Overview: LayoutDashboard,
+  Calendar: CalendarDays,
+  "My Tasks": ListTodo,
+  Projects: FolderKanban,
+  Courses: BookOpen,
+  Assignments: GraduationCap,
+  "AI Planner": Sparkles,
+  Notifications: Bell,
+  Settings: Settings2,
+};
+const statuses = ["backlog", "todo", "in_progress", "in_review", "completed"];
+const label = (s: string) =>
+  s.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+export default function Workspace() {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+  const [section, setSection] = useState<Section>("Overview");
+  const [mobileNav, setMobileNav] = useState(false);
+  const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
+  const [ready, setReady] = useState(() => !supabase);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [search, setSearch] = useState("");
+  const [modal, setModal] = useState<"task" | "event" | "project" | null>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [toast, setToast] = useState("");
+  const [error, setError] = useState("");
+  const [date, setDate] = useState(new Date());
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [plannerPrompt, setPlannerPrompt] = useState("");
+  const reload = useCallback(async () => {
+    if (!supabase) return;
+    const [t, p, e, a, c] = await Promise.all([
+      supabase.from("tasks").select("*").order("due_at", { ascending: true }),
+      supabase
+        .from("projects")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("calendar_events")
+        .select("*")
+        .gte("ends_at", new Date(Date.now() - 86400000).toISOString())
+        .lte("starts_at", new Date(Date.now() + 45 * 86400000).toISOString())
+        .order("starts_at"),
+      supabase
+        .from("assignments")
+        .select("*")
+        .is("ignored_at", null)
+        .order("original_due_at"),
+      supabase.from("courses").select("*").order("name"),
+    ]);
+    if (t.error || p.error || e.error || a.error || c.error)
+      setError(
+        (t.error || p.error || e.error || a.error || c.error)?.message ||
+          "Could not load workspace data",
+      );
+    setTasks((t.data || []) as Task[]);
+    setProjects((p.data || []) as Project[]);
+    setEvents((e.data || []) as Event[]);
+    setAssignments((a.data || []) as Assignment[]);
+    setCourses((c.data || []) as Course[]);
+  }, [supabase]);
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+    supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) {
+        router.replace("/login");
+        return;
+      }
+      setUser({ id: data.user.id, email: data.user.email });
+      setReady(true);
+      reload();
+    });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, s) => {
+      if (!s) router.replace("/login");
+    });
+    return () => subscription.unsubscribe();
+  }, [reload, router, supabase]);
+  async function createTask(title: string, extra: Partial<Task> = {}) {
+    if (!supabase) return;
+    const {
+      data: { user: u },
+    } = await supabase.auth.getUser();
+    if (!u) return;
+    const { error } = await supabase
+      .from("tasks")
+      .insert({ user_id: u.id, title, ...extra });
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setToast("Task added");
+    await reload();
+  }
+  async function updateTask(id: string, patch: Partial<Task>) {
+    if (!supabase) return;
+    const { error } = await supabase
+      .from("tasks")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) setError(error.message);
+    else {
+      setTasks((cur) => cur.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    }
+  }
+  async function removeTask(id: string) {
+    if (!supabase) return;
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+    if (error) setError(error.message);
+    else setTasks((v) => v.filter((t) => t.id !== id));
+  }
+  async function importAssignment(a: Assignment) {
+    if (!supabase) return;
+    const {
+      data: { user: u },
+    } = await supabase.auth.getUser();
+    if (!u) return;
+    const result = await supabase
+      .from("tasks")
+      .insert({
+        user_id: u.id,
+        assignment_id: a.id,
+        title: a.personal_title || a.title,
+        description: a.personal_description || a.description,
+        due_at: a.personal_due_at || a.original_due_at,
+        status: "todo",
+        priority: "medium",
+        source: "assignment",
+      })
+      .select()
+      .single();
+    if (result.error) setError(result.error.message);
+    else {
+      setTasks((v) => [...v, result.data as Task]);
+      setToast("Assignment added to My Tasks");
+    }
+  }
+  async function generatePlan() {
+    setPlanning(true);
+    setError("");
+    try {
+      const response = await fetch("/api/ai/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: plannerPrompt }),
+      });
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.error || "Could not generate a plan");
+      setProposal({
+        id: crypto.randomUUID(),
+        slots: data.slots.map(
+          (s: {
+            taskId: string;
+            title: string;
+            start: string;
+            end: string;
+          }) => ({ ...s, start: new Date(s.start), end: new Date(s.end) }),
+        ),
+        explanation: data.explanation,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not generate a plan");
+    } finally {
+      setPlanning(false);
+    }
+  }
+  const filtered = useMemo(
+    () =>
+      tasks.filter((t) => t.title.toLowerCase().includes(search.toLowerCase())),
+    [tasks, search],
+  );
+  const todayTasks = tasks.filter(
+    (t) =>
+      t.status !== "completed" &&
+      t.due_at &&
+      isSameDay(new Date(t.due_at), new Date()),
+  );
+  const upcoming = tasks
+    .filter(
+      (t) =>
+        t.status !== "completed" &&
+        t.due_at &&
+        new Date(t.due_at) >= new Date(),
+    )
+    .slice(0, 5);
+  const done = tasks.filter((t) => t.status === "completed").length;
+  if (!ready)
+    return (
+      <div className="loading">
+        <div className="brand-mark">
+          <CalendarDays size={20} />
+        </div>
+        <p>Preparing your workspace…</p>
+      </div>
+    );
+  if (!supabase)
+    return (
+      <div className="setup-screen">
+        <div className="brand-mark">
+          <CalendarDays size={22} />
+        </div>
+        <div className="eyebrow">DAYMARK SETUP</div>
+        <h1>Connect your workspace</h1>
+        <p>
+          Daymark stores your data in your private Supabase project. Add the
+          public project URL and anon key to <code>.env.local</code> to enable
+          sign-in and persistence.
+        </p>
+        <ol>
+          <li>Create a Supabase project on the free plan.</li>
+          <li>
+            Run <code>supabase/migrations/0001_daymark.sql</code>.
+          </li>
+          <li>
+            Copy <code>.env.example</code> to <code>.env.local</code> and fill
+            in both Supabase values.
+          </li>
+          <li>Restart the development server and create your account.</li>
+        </ol>
+        <a
+          href="https://supabase.com/dashboard"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open Supabase dashboard <ArrowRight size={14} />
+        </a>
+      </div>
+    );
+  return (
+    <div className="app-frame">
+      <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
+        <div className="sidebar-brand">
+          <div className="brand-mark small">
+            <CalendarDays size={17} />
+          </div>
+          <b>daymark</b>
+          <button
+            className="icon-button hide-desktop"
+            onClick={() => setMobileNav(false)}
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <button className="workspace-pill">
+          <div className="workspace-avatar">N</div>
+          <span>
+            <b>Personal workspace</b>
+            <small>Free plan</small>
+          </span>
+          <ChevronDown size={14} />
+        </button>
+        <nav>
+          {nav.map((group) => (
+            <div className="nav-group" key={group.title}>
+              <div className="nav-label">{group.title}</div>
+              {group.items.map((item) => {
+                const Icon = icons[item];
+                return (
+                  <button
+                    key={item}
+                    onClick={() => {
+                      setSection(item);
+                      setMobileNav(false);
+                    }}
+                    className={`nav-item ${section === item ? "active" : ""}`}
+                  >
+                    <Icon size={16} />
+                    <span>{item}</span>
+                    {item === "Notifications" && <i className="unread-dot" />}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <div className="storage-label">
+            <span>Weekly focus</span>
+            <span>
+              {Math.min(
+                100,
+                Math.round(
+                  (tasks.filter((t) => t.status === "completed").length /
+                    Math.max(1, tasks.length)) *
+                    100,
+                ),
+              )}
+              %
+            </span>
+          </div>
+          <div className="progress-track">
+            <i
+              style={{
+                width: `${Math.min(100, Math.round((done / Math.max(1, tasks.length)) * 100))}%`,
+              }}
+            />
+          </div>
+          <button className="user-row">
+            <div className="user-avatar">
+              {user?.email?.[0]?.toUpperCase() || "D"}
+            </div>
+            <span>
+              <b>{user?.email?.split("@")[0] || "My account"}</b>
+              <small>{user?.email}</small>
+            </span>
+            <MoreHorizontal size={16} />
+          </button>
+        </div>
+      </aside>
+      {mobileNav && (
+        <div className="scrim" onClick={() => setMobileNav(false)} />
+      )}
+      <main className="main-shell">
+        <header className="topbar">
+          <button
+            className="icon-button hide-desktop"
+            onClick={() => setMobileNav(true)}
+          >
+            <Menu size={19} />
+          </button>
+          <div className="crumb">
+            {section}
+            <span className="crumb-sep">/</span>
+            <span>
+              {section === "Overview"
+                ? format(new Date(), "EEEE, MMMM d")
+                : "Personal workspace"}
+            </span>
+          </div>
+          <div className="top-actions">
+            <label className="searchbox">
+              <Search size={15} />
+              <input
+                placeholder="Search anything…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <kbd>
+                <Command size={10} /> K
+              </kbd>
+            </label>
+            <button
+              className="button primary small-button"
+              onClick={() => setModal("task")}
+            >
+              <Plus size={15} /> <span>New task</span>
+            </button>
+            <button
+              className="icon-button"
+              title="Notifications"
+              onClick={() => setSection("Notifications")}
+            >
+              <Bell size={17} />
+            </button>
+            <button
+              className="user-avatar top-avatar"
+              title="Account settings"
+              onClick={() => setSection("Settings")}
+            >
+              {user?.email?.[0]?.toUpperCase() || "D"}
+            </button>
+          </div>
+        </header>
+        <div className="page-content">
+          {error && (
+            <div className="notice error page-notice">
+              {error}
+              <button onClick={() => setError("")}>
+                <X size={14} />
+              </button>
+            </div>
+          )}
+          {toast && (
+            <div className="toast">
+              {toast}
+              <button onClick={() => setToast("")}>
+                <X size={13} />
+              </button>
+            </div>
+          )}
+          {section === "Overview" && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">YOUR OVERVIEW</div>
+                  <h1>
+                    Good{" "}
+                    {new Date().getHours() < 12
+                      ? "morning"
+                      : new Date().getHours() < 17
+                        ? "afternoon"
+                        : "evening"}
+                    .
+                  </h1>
+                  <p>Here’s what’s on your plate today.</p>
+                </div>
+                <button
+                  className="button subtle"
+                  onClick={() => setSection("Calendar")}
+                >
+                  <CalendarDays size={15} /> Open calendar
+                </button>
+              </div>
+              <div className="metric-row">
+                <Metric
+                  label="Due today"
+                  value={String(todayTasks.length).padStart(2, "0")}
+                  detail="tasks need attention"
+                  icon={AlarmClock}
+                />
+                <Metric
+                  label="In progress"
+                  value={String(
+                    tasks.filter((t) => t.status === "in_progress").length,
+                  ).padStart(2, "0")}
+                  detail="currently underway"
+                  icon={Activity}
+                />
+                <Metric
+                  label="Completed"
+                  value={String(done).padStart(2, "0")}
+                  detail="all time"
+                  icon={CheckCircle2}
+                />
+                <Metric
+                  label="Active projects"
+                  value={String(
+                    projects.filter((p) => p.status === "active").length,
+                  ).padStart(2, "0")}
+                  detail="moving forward"
+                  icon={FolderKanban}
+                />
+              </div>
+              <div className="dashboard-grid">
+                <section className="panel schedule-panel">
+                  <PanelTitle
+                    title="Today’s schedule"
+                    action="View calendar"
+                    onClick={() => setSection("Calendar")}
+                  />
+                  {events.filter((e) =>
+                    isSameDay(new Date(e.starts_at), new Date()),
+                  ).length === 0 && todayTasks.length === 0 ? (
+                    <Empty
+                      compact
+                      icon={Clock3}
+                      title="A little breathing room"
+                      text="No events or deadlines today."
+                    />
+                  ) : (
+                    <div className="timeline">
+                      {[
+                        ...events
+                          .filter((e) =>
+                            isSameDay(new Date(e.starts_at), new Date()),
+                          )
+                          .map((e) => ({
+                            title: e.title,
+                            time: e.starts_at,
+                            color: e.color,
+                            type: "event",
+                          })),
+                        ...todayTasks.map((t) => ({
+                          title: t.title,
+                          time: t.due_at!,
+                          color: "#f0a85b",
+                          type: "task",
+                        })),
+                      ]
+                        .sort((a, b) => +new Date(a.time) - +new Date(b.time))
+                        .map((item, i) => (
+                          <div
+                            className="timeline-row"
+                            key={`${item.type}${i}`}
+                          >
+                            <time>{format(new Date(item.time), "h:mm a")}</time>
+                            <div className="timeline-line">
+                              <i style={{ background: item.color }} />
+                            </div>
+                            <div>
+                              <b>{item.title}</b>
+                              <small>
+                                {item.type === "event"
+                                  ? "Calendar event"
+                                  : "Task deadline"}
+                              </small>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                  <button
+                    className="add-inline"
+                    onClick={() => setModal("event")}
+                  >
+                    <Plus size={14} /> Add event
+                  </button>
+                </section>
+                <section className="panel upcoming-panel">
+                  <PanelTitle
+                    title="Upcoming deadlines"
+                    action="All tasks"
+                    onClick={() => setSection("My Tasks")}
+                  />
+                  {upcoming.length === 0 ? (
+                    <Empty
+                      compact
+                      icon={CheckCircle2}
+                      title="Nothing due soon"
+                      text="You’re all caught up."
+                    />
+                  ) : (
+                    <div className="deadline-list">
+                      {upcoming.map((t) => (
+                        <button
+                          className="deadline-row"
+                          key={t.id}
+                          onClick={() => setSection("My Tasks")}
+                        >
+                          <span className={`priority-mark ${t.priority}`} />
+                          <span className="deadline-copy">
+                            <b>{t.title}</b>
+                            <small>
+                              {projects.find((p) => p.id === t.project_id)
+                                ?.name || "Personal"}
+                            </small>
+                          </span>
+                          <time>{format(new Date(t.due_at!), "MMM d")}</time>
+                          <ArrowRight size={14} />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+                <section className="panel week-panel">
+                  <PanelTitle
+                    title="This week"
+                    action="Plan week"
+                    onClick={() => setSection("AI Planner")}
+                  />
+                  <div className="week-chart">
+                    {Array.from({ length: 7 }, (_, i) => {
+                      const d = addDays(
+                        startOfWeek(new Date(), { weekStartsOn: 1 }),
+                        i,
+                      );
+                      const count =
+                        tasks.filter(
+                          (t) => t.due_at && isSameDay(new Date(t.due_at), d),
+                        ).length +
+                        events.filter((e) =>
+                          isSameDay(new Date(e.starts_at), d),
+                        ).length;
+                      return (
+                        <div key={i} className="week-day">
+                          <span className="week-hours">
+                            {count
+                              ? `${count} item${count > 1 ? "s" : ""}`
+                              : "free"}
+                          </span>
+                          <div className="bar-track">
+                            <i
+                              style={{
+                                height: `${Math.max(8, Math.min(94, count * 24))}%`,
+                              }}
+                            />
+                          </div>
+                          <span
+                            className={`week-date ${isSameDay(d, new Date()) ? "today" : ""}`}
+                          >
+                            {format(d, "EEEEE")}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+                <section className="panel quick-panel">
+                  <PanelTitle title="Quick actions" />
+                  <div className="quick-actions">
+                    <QuickAction
+                      icon={Plus}
+                      title="Create a task"
+                      onClick={() => setModal("task")}
+                    />
+                    <QuickAction
+                      icon={CalendarDays}
+                      title="Schedule an event"
+                      onClick={() => setModal("event")}
+                    />
+                    <QuickAction
+                      icon={FolderKanban}
+                      title="New project"
+                      onClick={() => setModal("project")}
+                    />
+                    <QuickAction
+                      icon={Sparkles}
+                      title="Plan my week"
+                      onClick={() => setSection("AI Planner")}
+                    />
+                  </div>
+                </section>
+              </div>
+            </>
+          )}
+          {section === "My Tasks" && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">TASK MANAGEMENT</div>
+                  <h1>My tasks</h1>
+                  <p>{filtered.length} tasks across your workspace</p>
+                </div>
+                <div className="heading-actions">
+                  <button className="button subtle">
+                    <ListTodo size={15} /> Board
+                  </button>
+                  <button
+                    className="button primary"
+                    onClick={() => setModal("task")}
+                  >
+                    <Plus size={15} /> Add task
+                  </button>
+                </div>
+              </div>
+              <div className="task-board">
+                {statuses.map((status) => (
+                  <div
+                    className="task-column"
+                    key={status}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      const id = e.dataTransfer.getData("task");
+                      if (id) updateTask(id, { status });
+                    }}
+                  >
+                    <div className="column-title">
+                      <span className={`status-dot ${status}`} />
+                      <b>{label(status)}</b>
+                      <span className="count-pill">
+                        {filtered.filter((t) => t.status === status).length}
+                      </span>
+                      <button
+                        className="icon-button mini"
+                        onClick={() => setModal("task")}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    {filtered
+                      .filter((t) => t.status === status)
+                      .map((t) => (
+                        <TaskCard
+                          key={t.id}
+                          task={t}
+                          onEdit={() => setEditingTask(t)}
+                          project={
+                            projects.find((p) => p.id === t.project_id)?.name
+                          }
+                          onComplete={() =>
+                            updateTask(t.id, {
+                              status:
+                                t.status === "completed" ? "todo" : "completed",
+                            })
+                          }
+                          onDelete={() => removeTask(t.id)}
+                          draggable
+                          onDragStart={(e) =>
+                            e.dataTransfer.setData("task", t.id)
+                          }
+                        />
+                      ))}
+                    <button
+                      className="column-add"
+                      onClick={() => setModal("task")}
+                    >
+                      <Plus size={14} /> Add task
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {section === "Projects" && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">YOUR WORK</div>
+                  <h1>Projects</h1>
+                  <p>Keep related work moving together.</p>
+                </div>
+                <button
+                  className="button primary"
+                  onClick={() => setModal("project")}
+                >
+                  <Plus size={15} /> New project
+                </button>
+              </div>
+              {projects.length === 0 ? (
+                <Empty
+                  icon={FolderKanban}
+                  title="Start with a project"
+                  text="Give your goals a home, then connect the tasks that move them forward."
+                  action="Create project"
+                  onAction={() => setModal("project")}
+                />
+              ) : (
+                <div className="project-grid">
+                  {projects.map((p) => {
+                    const related = tasks.filter((t) => t.project_id === p.id);
+                    const completed = related.filter(
+                      (t) => t.status === "completed",
+                    ).length;
+                    return (
+                      <article className="project-card" key={p.id}>
+                        <div className="project-card-top">
+                          <span
+                            className="project-color"
+                            style={{ background: p.color }}
+                          >
+                            <FolderKanban size={16} />
+                          </span>
+                          <button
+                            className="icon-button mini"
+                            onClick={async () => {
+                              const result = await supabase
+                                ?.from("projects")
+                                .delete()
+                                .eq("id", p.id);
+                              if (!result?.error) {
+                                setProjects((v) =>
+                                  v.filter((x) => x.id !== p.id),
+                                );
+                                setToast("Project removed");
+                              }
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                        <h3>{p.name}</h3>
+                        <p>{p.description || "No description added"}</p>
+                        <div className="project-progress-label">
+                          <span>
+                            {completed} of {related.length} tasks
+                          </span>
+                          <span>
+                            {related.length
+                              ? Math.round((completed / related.length) * 100)
+                              : 0}
+                            %
+                          </span>
+                        </div>
+                        <div className="progress-track">
+                          <i
+                            style={{
+                              width: `${related.length ? (completed / related.length) * 100 : 0}%`,
+                              background: p.color,
+                            }}
+                          />
+                        </div>
+                        <div className="project-card-foot">
+                          <span>{p.status}</span>
+                          {p.target_date && (
+                            <span>
+                              Target {format(new Date(p.target_date), "MMM d")}
+                            </span>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
+                  <button
+                    className="project-add-card"
+                    onClick={() => setModal("project")}
+                  >
+                    <Plus size={18} />
+                    <span>Create a project</span>
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+          {section === "Calendar" && (
+            <CalendarView
+              date={date}
+              setDate={setDate}
+              events={events}
+              tasks={tasks}
+              addEvent={() => setModal("event")}
+            />
+          )}
+          {section === "Assignments" && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">ACADEMICS</div>
+                  <h1>Assignments</h1>
+                  <p>Imported coursework and your personal deadlines.</p>
+                </div>
+                <button
+                  className="button subtle"
+                  onClick={() => setSection("Courses")}
+                >
+                  <GraduationCap size={15} /> Manage courses
+                </button>
+              </div>
+              {assignments.length === 0 ? (
+                <Empty
+                  icon={GraduationCap}
+                  title="No assignments yet"
+                  text="Connect Schoology in Settings, or create a task manually. Assignment import stays under your control."
+                  action="Open integrations"
+                  onAction={() => setSection("Settings")}
+                />
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Assignment</th>
+                        <th>Course</th>
+                        <th>Schoology due</th>
+                        <th>Your deadline</th>
+                        <th>Status</th>
+                        <th>Task</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assignments.map((a) => (
+                        <AssignmentRow
+                          key={a.id}
+                          assignment={a}
+                          course={
+                            courses.find((c) => c.id === a.course_id)?.name ||
+                            "—"
+                          }
+                          imported={tasks.some((t) => t.assignment_id === a.id)}
+                          importTask={() => importAssignment(a)}
+                          onError={setError}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+          {section === "Courses" && (
+            <CoursesView
+              courses={courses}
+              onRefresh={reload}
+              toast={setToast}
+              error={setError}
+              onSettings={() => setSection("Settings")}
+            />
+          )}
+          {section === "AI Planner" && (
+            <>
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">THOUGHTFUL SCHEDULING</div>
+                  <h1>AI Planner</h1>
+                  <p>Build a realistic plan from your tasks and calendar.</p>
+                </div>
+                <span className="state neutral">
+                  <span className="status-dot todo" /> Deterministic planner
+                  ready
+                </span>
+              </div>
+              <div className="planner-card">
+                <div className="planner-icon">
+                  <Sparkles size={19} />
+                </div>
+                <h2>Make space for focused work.</h2>
+                <p>
+                  Daymark checks your deadlines, priorities, existing
+                  commitments, and working hours. Review the proposed sessions
+                  before anything is added to your calendar.
+                </p>
+                <textarea
+                  className="planner-prompt"
+                  value={plannerPrompt}
+                  onChange={(event) => setPlannerPrompt(event.target.value)}
+                  placeholder="Add context, e.g. robotics on Wednesday and a three-hour history assignment…"
+                  rows={3}
+                />
+                <button className="button primary" onClick={generatePlan}>
+                  <Sparkles size={15} />{" "}
+                  {planning ? "Building plan…" : "Generate a week plan"}
+                </button>
+                <div className="provider-note">
+                  The deterministic scheduler always works; when a server AI
+                  provider is configured, it adds a concise explanation.
+                </div>
+              </div>
+              {proposal && (
+                <div className="panel proposal-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <div className="eyebrow">PROPOSED SCHEDULE</div>
+                      <h2>{proposal.slots.length} work sessions</h2>
+                    </div>
+                    <button
+                      className="icon-button"
+                      onClick={() => setProposal(null)}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                  {proposal.explanation && (
+                    <p className="proposal-explanation">
+                      {proposal.explanation}
+                    </p>
+                  )}
+                  {proposal.slots.length === 0 ? (
+                    <p className="muted">
+                      No schedulable tasks in this date range.
+                    </p>
+                  ) : (
+                    proposal.slots.map((s, i) => (
+                      <div className="proposal-row" key={i}>
+                        <span className="status-dot in_progress" />
+                        <b>{s.title}</b>
+                        <time>
+                          {format(s.start, "EEE, MMM d · h:mm a")} —{" "}
+                          {format(s.end, "h:mm a")}
+                        </time>
+                      </div>
+                    ))
+                  )}
+                  <div className="proposal-actions">
+                    <button
+                      className="button subtle"
+                      onClick={() => setProposal(null)}
+                    >
+                      Reject
+                    </button>
+                    <button
+                      className="button primary"
+                      disabled={!proposal.slots.length}
+                      onClick={async () => {
+                        if (!supabase) return;
+                        const {
+                          data: { user: u },
+                        } = await supabase.auth.getUser();
+                        if (!u) return;
+                        const { data: prop } = await supabase
+                          .from("ai_scheduling_proposals")
+                          .insert({
+                            id: proposal.id,
+                            user_id: u.id,
+                            status: "accepted",
+                            proposal: proposal.slots,
+                          })
+                          .select()
+                          .single();
+                        if (!prop) {
+                          setError("Could not save approved schedule.");
+                          return;
+                        }
+                        const result = await supabase
+                          .from("scheduled_work_sessions")
+                          .insert(
+                            proposal.slots.map((s) => ({
+                              user_id: u.id,
+                              task_id: s.taskId,
+                              starts_at: s.start.toISOString(),
+                              ends_at: s.end.toISOString(),
+                              proposal_id: proposal.id,
+                            })),
+                          );
+                        if (result.error) setError(result.error.message);
+                        else {
+                          setToast("Approved sessions added to your plan");
+                          setProposal(null);
+                        }
+                      }}
+                    >
+                      Approve schedule
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          {section === "Notifications" && <NotificationCenter />}
+          {section === "Settings" && (
+            <SettingsView
+              user={user}
+              onSignOut={async () => {
+                await supabase?.auth.signOut();
+                router.replace("/login");
+              }}
+            />
+          )}
+        </div>
+      </main>
+      {modal && (
+        <CreateModal
+          kind={modal}
+          close={() => setModal(null)}
+          projects={projects}
+          saveTask={createTask}
+          saved={async () => {
+            setModal(null);
+            await reload();
+          }}
+          supabase={supabase}
+          toast={setToast}
+          error={setError}
+        />
+      )}
+      {editingTask && supabase && user && (
+        <TaskDetailModal
+          task={editingTask}
+          projects={projects}
+          supabase={supabase}
+          userId={user?.id || ""}
+          onClose={() => setEditingTask(null)}
+          onSave={async (id, patch) => {
+            await updateTask(id, patch);
+            setEditingTask(null);
+          }}
+          onDuplicate={async (task) => {
+            await createTask(`${task.title} (copy)`, {
+              description: task.description,
+              status: "todo",
+              priority: task.priority,
+              due_at: task.due_at,
+              project_id: task.project_id,
+              estimated_minutes: task.estimated_minutes,
+            });
+            setEditingTask(null);
+          }}
+          onDelete={async (id) => {
+            await removeTask(id);
+            setEditingTask(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  detail,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  icon: React.ElementType;
+}) {
+  return (
+    <div className="metric">
+      <div className="metric-top">
+        <span>{label}</span>
+        <Icon size={15} />
+      </div>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+function PanelTitle({
+  title,
+  action,
+  onClick,
+}: {
+  title: string;
+  action?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <div className="panel-heading">
+      <h2>{title}</h2>
+      {action && (
+        <button className="link-button" onClick={onClick}>
+          {action}
+          <ArrowRight size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+function Empty({
+  icon: Icon,
+  title,
+  text,
+  action,
+  onAction,
+  compact,
+}: {
+  icon: React.ElementType;
+  title: string;
+  text: string;
+  action?: string;
+  onAction?: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className={`empty ${compact ? "compact" : ""}`}>
+      <Icon size={compact ? 18 : 22} />
+      <b>{title}</b>
+      <p>{text}</p>
+      {action && (
+        <button className="button subtle small-button" onClick={onAction}>
+          {action}
+          <ArrowRight size={13} />
+        </button>
+      )}
+    </div>
+  );
+}
+function QuickAction({
+  icon: Icon,
+  title,
+  onClick,
+}: {
+  icon: React.ElementType;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button className="quick-action" onClick={onClick}>
+      <span>
+        <Icon size={16} />
+      </span>
+      {title}
+      <ArrowRight size={13} />
+    </button>
+  );
+}
+function TaskCard({
+  task,
+  onEdit,
+  project,
+  onComplete,
+  onDelete,
+  draggable,
+  onDragStart,
+}: {
+  task: Task;
+  onEdit: () => void;
+  project?: string;
+  onComplete: () => void;
+  onDelete: () => void;
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+}) {
+  return (
+    <article
+      className="task-card"
+      draggable={draggable}
+      onDragStart={onDragStart}
+    >
+      <div className="task-card-head">
+        <button
+          className={`check-circle ${task.status === "completed" ? "checked" : ""}`}
+          onClick={onComplete}
+          aria-label="Toggle complete"
+        >
+          {task.status === "completed" && <Check size={12} />}
+        </button>
+        <button
+          className="icon-button mini edit-task"
+          onClick={onEdit}
+          aria-label="Edit task"
+        >
+          <MoreHorizontal size={14} />
+        </button>
+        <button className="icon-button mini delete-task" onClick={onDelete}>
+          <Trash2 size={13} />
+        </button>
+      </div>
+      <h3>{task.title}</h3>
+      {task.description && <p>{task.description}</p>}
+      <div className="task-card-meta">
+        <span className={`priority ${task.priority}`}>
+          <i />
+          {label(task.priority)}
+        </span>
+        {task.due_at && (
+          <span>
+            <Clock3 size={12} />
+            {format(new Date(task.due_at), "MMM d")}
+          </span>
+        )}
+      </div>
+      {project && (
+        <div className="task-project">
+          <span />
+          {project}
+        </div>
+      )}
+    </article>
+  );
+}
+function CalendarView({
+  date,
+  setDate,
+  events,
+  tasks,
+  addEvent,
+}: {
+  date: Date;
+  setDate: (d: Date) => void;
+  events: Event[];
+  tasks: Task[];
+  addEvent: () => void;
+}) {
+  const [view, setView] = useState<"Month" | "Week" | "Day" | "Agenda">("Week");
+  const start =
+    view === "Month"
+      ? startOfWeek(startOfMonth(date), { weekStartsOn: 1 })
+      : startOfWeek(date, { weekStartsOn: 1 });
+  const days =
+    view === "Month"
+      ? eachDayOfInterval({ start, end: addDays(start, 41) })
+      : view === "Day"
+        ? [date]
+        : Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const entries = [
+    ...events.map((e) => ({
+      id: e.id,
+      title: e.title,
+      time: e.starts_at,
+      color: e.color,
+      kind: "Event",
+    })),
+    ...tasks
+      .filter((t) => t.due_at && t.status !== "completed")
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        time: t.due_at!,
+        color: "#f0a85b",
+        kind: "Task",
+      })),
+  ];
+  const shift = () =>
+    setDate(addDays(date, view === "Month" ? 30 : view === "Day" ? 1 : 7));
+  return (
+    <>
+      <div className="page-heading calendar-heading">
+        <div>
+          <div className="eyebrow">YOUR TIME</div>
+          <h1>Calendar</h1>
+          <p>See commitments and deadlines together.</p>
+        </div>
+        <button className="button primary" onClick={addEvent}>
+          <Plus size={15} /> Add event
+        </button>
+      </div>
+      <div className="calendar-toolbar">
+        <div className="date-nav">
+          <button
+            className="button subtle small-button"
+            onClick={() => setDate(new Date())}
+          >
+            Today
+          </button>
+          <button
+            className="icon-button"
+            onClick={() =>
+              setDate(
+                addDays(
+                  date,
+                  -(view === "Month" ? 30 : view === "Day" ? 1 : 7),
+                ),
+              )
+            }
+          >
+            <ChevronLeft size={17} />
+          </button>
+          <button className="icon-button" onClick={shift}>
+            <ChevronRight size={17} />
+          </button>
+          <h2>{format(date, view === "Day" ? "MMMM d, yyyy" : "MMMM yyyy")}</h2>
+        </div>
+        <div className="view-switch">
+          {(["Day", "Week", "Month", "Agenda"] as const).map((v) => (
+            <button
+              className={view === v ? "selected" : ""}
+              onClick={() => setView(v)}
+              key={v}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+      {view === "Agenda" ? (
+        <div className="panel agenda-list">
+          {entries
+            .filter(
+              (e) =>
+                new Date(e.time) >= startOfWeek(date, { weekStartsOn: 1 }) &&
+                new Date(e.time) <
+                  addDays(startOfWeek(date, { weekStartsOn: 1 }), 7),
+            )
+            .sort((a, b) => +new Date(a.time) - +new Date(b.time))
+            .map((e) => (
+              <div className="agenda-row" key={e.id}>
+                <time>{format(new Date(e.time), "EEE, MMM d · h:mm a")}</time>
+                <span style={{ background: e.color }} />
+                <b>{e.title}</b>
+                <small>{e.kind}</small>
+              </div>
+            ))}
+          {entries.length === 0 && (
+            <Empty
+              icon={CalendarDays}
+              title="No scheduled items"
+              text="Create an event or schedule task work."
+            />
+          )}
+        </div>
+      ) : (
+        <div className={`calendar-grid ${view.toLowerCase()}`}>
+          <div className="calendar-weekdays">
+            {days.map((d) => (
+              <div key={d.toISOString()}>{format(d, "EEE")}</div>
+            ))}
+          </div>
+          <div className="calendar-cells">
+            {days.map((d) => {
+              const dayEntries = entries.filter((e) =>
+                isSameDay(new Date(e.time), d),
+              );
+              return (
+                <div
+                  key={d.toISOString()}
+                  className={`calendar-cell ${!isSameMonth(d, date) && view === "Month" ? "outside" : ""} ${isSameDay(d, new Date()) ? "is-today" : ""}`}
+                  onDoubleClick={addEvent}
+                >
+                  <span className="cell-date">
+                    {view !== "Day" && format(d, "d")}
+                    {view === "Day" && format(d, "EEEE, MMMM d")}
+                  </span>
+                  {dayEntries.slice(0, view === "Month" ? 3 : 8).map((e) => (
+                    <div
+                      className="calendar-item"
+                      key={e.id}
+                      style={{ borderLeftColor: e.color }}
+                      title={e.title}
+                    >
+                      {format(new Date(e.time), "h:mm")} {e.title}
+                    </div>
+                  ))}
+                  {dayEntries.length > 3 && view === "Month" && (
+                    <small className="muted">
+                      +{dayEntries.length - 3} more
+                    </small>
+                  )}
+                  <button className="cell-add" onClick={addEvent}>
+                    <Plus size={13} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+function TaskDetailModal({
+  task,
+  projects,
+  supabase,
+  userId,
+  onClose,
+  onSave,
+  onDuplicate,
+  onDelete,
+}: {
+  task: Task;
+  projects: Project[];
+  supabase: NonNullable<ReturnType<typeof createClient>>;
+  userId: string;
+  onClose: () => void;
+  onSave: (id: string, patch: Partial<Task>) => Promise<void>;
+  onDuplicate: (task: Task) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(task.title);
+  const [description, setDescription] = useState(task.description || "");
+  const [status, setStatus] = useState(task.status);
+  const [priority, setPriority] = useState(task.priority);
+  const [due, setDue] = useState(
+    task.due_at ? format(new Date(task.due_at), "yyyy-MM-dd'T'HH:mm") : "",
+  );
+  const [minutes, setMinutes] = useState(
+    task.estimated_minutes?.toString() || "",
+  );
+  const [projectId, setProjectId] = useState(task.project_id || "");
+  const [busy, setBusy] = useState(false);
+  const [subtasks, setSubtasks] = useState<
+    { id: string; title: string; is_completed: boolean }[]
+  >([]);
+  const [comments, setComments] = useState<
+    { id: string; body: string; created_at: string }[]
+  >([]);
+  const [subtaskTitle, setSubtaskTitle] = useState("");
+  const [comment, setComment] = useState("");
+  useEffect(() => {
+    let active = true;
+    async function loadDetails() {
+      const [subtaskResult, commentResult] = await Promise.all([
+        supabase
+          .from("subtasks")
+          .select("id,title,is_completed")
+          .eq("task_id", task.id)
+          .order("position"),
+        supabase
+          .from("task_comments")
+          .select("id,body,created_at")
+          .eq("task_id", task.id)
+          .order("created_at", { ascending: false }),
+      ]);
+      if (!active) return;
+      if (!subtaskResult.error) setSubtasks(subtaskResult.data || []);
+      if (!commentResult.error) setComments(commentResult.data || []);
+    }
+    void loadDetails();
+    return () => {
+      active = false;
+    };
+  }, [supabase, task.id]);
+  async function addSubtask(event: React.FormEvent) {
+    event.preventDefault();
+    const value = subtaskTitle.trim();
+    if (!value) return;
+    const result = await supabase
+      .from("subtasks")
+      .insert({
+        user_id: userId,
+        task_id: task.id,
+        title: value,
+        position: subtasks.length,
+      })
+      .select("id,title,is_completed")
+      .single();
+    if (!result.error) {
+      setSubtasks((items) => [...items, result.data]);
+      setSubtaskTitle("");
+    }
+  }
+  async function toggleSubtask(item: (typeof subtasks)[number]) {
+    const result = await supabase
+      .from("subtasks")
+      .update({ is_completed: !item.is_completed })
+      .eq("id", item.id);
+    if (!result.error)
+      setSubtasks((items) =>
+        items.map((entry) =>
+          entry.id === item.id
+            ? { ...entry, is_completed: !entry.is_completed }
+            : entry,
+        ),
+      );
+  }
+  async function addComment(event: React.FormEvent) {
+    event.preventDefault();
+    const value = comment.trim();
+    if (!value) return;
+    const result = await supabase
+      .from("task_comments")
+      .insert({ user_id: userId, task_id: task.id, body: value })
+      .select("id,body,created_at")
+      .single();
+    if (!result.error) {
+      setComments((items) => [result.data, ...items]);
+      setComment("");
+    }
+  }
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!title.trim()) return;
+    setBusy(true);
+    await onSave(task.id, {
+      title: title.trim(),
+      description,
+      status,
+      priority,
+      due_at: due ? new Date(due).toISOString() : null,
+      estimated_minutes: minutes ? Number(minutes) : null,
+      project_id: projectId || null,
+    });
+    setBusy(false);
+  }
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <form className="modal" onSubmit={save}>
+        <div className="modal-head">
+          <div>
+            <div className="eyebrow">TASK DETAILS</div>
+            <h2>Edit task</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose}>
+            <X size={17} />
+          </button>
+        </div>
+        <label>
+          Title
+          <input
+            required
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </label>
+        <label>
+          Description
+          <textarea
+            rows={4}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </label>
+        <div className="form-row">
+          <label>
+            Status
+            <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              {statuses.map((s) => (
+                <option key={s} value={s}>
+                  {label(s)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Priority
+            <select
+              value={priority}
+              onChange={(e) => setPriority(e.target.value)}
+            >
+              {["low", "medium", "high", "urgent"].map((s) => (
+                <option key={s} value={s}>
+                  {label(s)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="form-row">
+          <label>
+            Due date
+            <input
+              type="datetime-local"
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+            />
+          </label>
+          <label>
+            Estimate (minutes)
+            <input
+              type="number"
+              min="5"
+              step="5"
+              value={minutes}
+              onChange={(e) => setMinutes(e.target.value)}
+            />
+          </label>
+        </div>
+        <label>
+          Project
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+          >
+            <option value="">No project</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <section className="detail-section">
+          <div className="section-heading">
+            <h3>Checklist</h3>
+            <span className="muted">
+              {subtasks.filter((item) => item.is_completed).length}/
+              {subtasks.length}
+            </span>
+          </div>
+          {subtasks.map((item) => (
+            <label className="checklist-row" key={item.id}>
+              <input
+                type="checkbox"
+                checked={item.is_completed}
+                onChange={() => void toggleSubtask(item)}
+              />
+              <span className={item.is_completed ? "completed-text" : ""}>
+                {item.title}
+              </span>
+            </label>
+          ))}
+          <form className="inline-add" onSubmit={addSubtask}>
+            <input
+              aria-label="New checklist item"
+              value={subtaskTitle}
+              onChange={(e) => setSubtaskTitle(e.target.value)}
+              placeholder="Add checklist item"
+            />
+            <button className="button subtle small-button" type="submit">
+              Add
+            </button>
+          </form>
+        </section>
+        <section className="detail-section">
+          <div className="section-heading">
+            <h3>Notes</h3>
+            <span className="muted">{comments.length}</span>
+          </div>
+          <form className="inline-add" onSubmit={addComment}>
+            <input
+              aria-label="Task note"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Add a note"
+            />
+            <button className="button subtle small-button" type="submit">
+              Post
+            </button>
+          </form>
+          {comments.map((entry) => (
+            <article className="comment-row" key={entry.id}>
+              <p>{entry.body}</p>
+              <time>{format(new Date(entry.created_at), "MMM d, h:mm a")}</time>
+            </article>
+          ))}
+        </section>
+        <div className="modal-actions task-detail-actions">
+          <button
+            className="button danger-outline small-button"
+            type="button"
+            onClick={() => onDelete(task.id)}
+          >
+            Delete
+          </button>
+          <button
+            className="button subtle small-button"
+            type="button"
+            onClick={() => onDuplicate(task)}
+          >
+            Duplicate
+          </button>
+          <span />
+          <button className="button subtle" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="button primary" disabled={busy}>
+            {busy ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CreateModal({
+  kind,
+  close,
+  projects,
+  saveTask,
+  saved,
+  supabase,
+  toast,
+  error,
+}: {
+  kind: "task" | "event" | "project";
+  close: () => void;
+  projects: Project[];
+  saveTask: (title: string, extra: Partial<Task>) => Promise<void>;
+  saved: () => Promise<void>;
+  supabase: ReturnType<typeof createClient>;
+  toast: (s: string) => void;
+  error: (s: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState("medium");
+  const [due, setDue] = useState("");
+  const [estimate, setEstimate] = useState("");
+  const [project, setProject] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    if (!title.trim()) {
+      setBusy(false);
+      return;
+    }
+    if (kind === "task") {
+      await saveTask(title.trim(), {
+        description,
+        priority,
+        due_at: due ? new Date(due).toISOString() : null,
+        project_id: project || null,
+        estimated_minutes: estimate ? Number(estimate) : null,
+        status: "todo",
+      });
+      close();
+    } else if (kind === "event") {
+      if (!supabase) return;
+      const a = new Date(start),
+        b = new Date(end);
+      if (!start || !end || b <= a) {
+        error("Choose a valid start and end time.");
+        setBusy(false);
+        return;
+      }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const result = await supabase
+        .from("calendar_events")
+        .insert({
+          user_id: user?.id,
+          title,
+          description,
+          starts_at: a.toISOString(),
+          ends_at: b.toISOString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        })
+        .select()
+        .single();
+      if (result.error) error(result.error.message);
+      else {
+        toast("Event scheduled");
+        await saved();
+      }
+      close();
+    } else {
+      if (!supabase) return;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const result = await supabase
+        .from("projects")
+        .insert({
+          user_id: user?.id,
+          name: title,
+          description,
+          color: "#8585ff",
+        })
+        .select()
+        .single();
+      if (result.error) error(result.error.message);
+      else {
+        toast("Project created");
+        await saved();
+      }
+      close();
+    }
+    setBusy(false);
+  }
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+    >
+      <form className="modal" onSubmit={submit}>
+        <div className="modal-head">
+          <div>
+            <div className="eyebrow">
+              {kind === "task"
+                ? "GET IT MOVING"
+                : kind === "event"
+                  ? "MAKE TIME"
+                  : "GIVE IT A HOME"}
+            </div>
+            <h2>
+              {kind === "task"
+                ? "Create a task"
+                : kind === "event"
+                  ? "Schedule an event"
+                  : "Create a project"}
+            </h2>
+          </div>
+          <button className="icon-button" type="button" onClick={close}>
+            <X size={17} />
+          </button>
+        </div>
+        <label>
+          {kind === "project" ? "Project name" : "Title"}
+          <input
+            autoFocus
+            required
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={
+              kind === "task"
+                ? "What needs to get done?"
+                : kind === "event"
+                  ? "What’s happening?"
+                  : "A name for this project"
+            }
+          />
+        </label>
+        <label>
+          Description{" "}
+          <textarea
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Add some context…"
+          />
+        </label>
+        {kind === "task" && (
+          <div className="form-row">
+            <label>
+              Priority
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
+              >
+                {["low", "medium", "high", "urgent"].map((x) => (
+                  <option key={x} value={x}>
+                    {label(x)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Due date
+              <input
+                type="datetime-local"
+                value={due}
+                onChange={(e) => setDue(e.target.value)}
+              />
+            </label>
+          </div>
+        )}
+        {kind === "task" && (
+          <label>
+            Project
+            <select
+              value={project}
+              onChange={(e) => setProject(e.target.value)}
+            >
+              <option value="">No project</option>
+              {projects.map((p) => (
+                <option value={p.id} key={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {kind === "task" && (
+          <label>
+            Estimated duration (minutes)
+            <input
+              type="number"
+              min="5"
+              step="5"
+              value={estimate}
+              onChange={(e) => setEstimate(e.target.value)}
+              placeholder="60"
+            />
+          </label>
+        )}
+        {kind === "event" && (
+          <div className="form-row">
+            <label>
+              Starts
+              <input
+                type="datetime-local"
+                required
+                value={start}
+                onChange={(e) => setStart(e.target.value)}
+              />
+            </label>
+            <label>
+              Ends
+              <input
+                type="datetime-local"
+                required
+                value={end}
+                onChange={(e) => setEnd(e.target.value)}
+              />
+            </label>
+          </div>
+        )}
+        <div className="modal-actions">
+          <button className="button subtle" type="button" onClick={close}>
+            Cancel
+          </button>
+          <button className="button primary" disabled={busy}>
+            {busy
+              ? "Saving…"
+              : kind === "task"
+                ? "Create task"
+                : kind === "event"
+                  ? "Save event"
+                  : "Create project"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+function NotificationCenter() {
+  const [rows, setRows] = useState<
+    {
+      id: string;
+      title: string;
+      body: string;
+      read_at: string | null;
+      created_at: string;
+    }[]
+  >([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    const c = createClient();
+    c?.from("notifications")
+      .select("id,title,body,read_at,created_at")
+      .order("created_at", { ascending: false })
+      .limit(50)
+      .then(({ data, error }) => {
+        if (error) setError(error.message);
+        else setRows(data || []);
+      });
+  }, []);
+  async function read(id: string) {
+    const c = createClient();
+    await c
+      ?.from("notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("id", id);
+    setRows((v) =>
+      v.map((n) =>
+        n.id === id ? { ...n, read_at: new Date().toISOString() } : n,
+      ),
+    );
+  }
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">STAY IN THE LOOP</div>
+          <h1>Notifications</h1>
+          <p>Your reminders and recent activity.</p>
+        </div>
+      </div>
+      {error && <div className="notice error">{error}</div>}
+      <NotificationPreferences />
+      <div className="panel notification-list">
+        {rows.length ? (
+          rows.map((n) => (
+            <button
+              className={`notification-row ${n.read_at ? "read" : "unread"}`}
+              key={n.id}
+              onClick={() => read(n.id)}
+            >
+              <span className="notification-icon">
+                <Bell size={15} />
+              </span>
+              <span>
+                <b>{n.title}</b>
+                <p>{n.body}</p>
+                <small>
+                  {format(new Date(n.created_at), "MMM d · h:mm a")}
+                </small>
+              </span>
+              {!n.read_at && <i className="unread-dot" />}
+            </button>
+          ))
+        ) : (
+          <Empty
+            icon={Bell}
+            title="You’re all caught up"
+            text="In-app reminders and schedule updates will show up here."
+          />
+        )}
+      </div>
+    </>
+  );
+}
+function NotificationPreferences() {
+  const [value, setValue] = useState({
+    in_app_enabled: true,
+    push_enabled: false,
+    discord_enabled: false,
+    discord_user_id: "",
+    email_enabled: false,
+    reminder_minutes: [1440, 120],
+    quiet_start: "",
+    quiet_end: "",
+    daily_summary: false,
+    weekly_summary: false,
+  });
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    const c = createClient();
+    c?.from("notification_preferences")
+      .select("*")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data)
+          setValue((v) => ({
+            ...v,
+            ...data,
+            discord_user_id: data.discord_user_id || "",
+            quiet_start: data.quiet_start || "",
+            quiet_end: data.quiet_end || "",
+          }));
+      });
+  }, []);
+  async function save() {
+    const c = createClient();
+    if (!c) return;
+    const { data } = await c.auth.getUser();
+    const { error } = await c.from("notification_preferences").upsert({
+      ...value,
+      user_id: data.user?.id,
+      discord_user_id: value.discord_user_id || null,
+      quiet_start: value.quiet_start || null,
+      quiet_end: value.quiet_end || null,
+    });
+    setMessage(error ? error.message : "Notification preferences saved.");
+  }
+  async function subscribePush() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setMessage("Browser push is not available in this browser.");
+      return;
+    }
+    const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!key) {
+      setMessage(
+        "Set NEXT_PUBLIC_VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY first.",
+      );
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      setMessage("Browser notification permission was not granted.");
+      return;
+    }
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    const subscription =
+      (await registration.pushManager.getSubscription()) ||
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: Uint8Array.from(
+          atob(key.replace(/-/g, "+").replace(/_/g, "/")),
+          (c) => c.charCodeAt(0),
+        ),
+      }));
+    const result = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subscription.toJSON()),
+    });
+    setMessage(
+      result.ok
+        ? "Browser push is enabled."
+        : "Could not save push subscription.",
+    );
+  }
+  function toggle(
+    key:
+      | "in_app_enabled"
+      | "push_enabled"
+      | "discord_enabled"
+      | "email_enabled"
+      | "daily_summary"
+      | "weekly_summary",
+  ) {
+    setValue((v) => ({ ...v, [key]: !v[key] }));
+  }
+  return (
+    <section className="panel notification-preferences">
+      <div className="panel-heading">
+        <h2>Reminder preferences</h2>
+        <button className="button subtle small-button" onClick={save}>
+          Save preferences
+        </button>
+      </div>
+      <div className="preference-grid">
+        <label>
+          <input
+            type="checkbox"
+            checked={value.in_app_enabled}
+            onChange={() => toggle("in_app_enabled")}
+          />{" "}
+          In-app
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={value.push_enabled}
+            onChange={() => toggle("push_enabled")}
+          />{" "}
+          Browser push
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={value.discord_enabled}
+            onChange={() => toggle("discord_enabled")}
+          />{" "}
+          Discord DM
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={value.email_enabled}
+            onChange={() => toggle("email_enabled")}
+          />{" "}
+          Email
+        </label>
+      </div>
+      <div className="preference-grid secondary">
+        <span className="muted reminder-label">Remind me</span>
+        {[4320, 1440, 120].map((minutes) => (
+          <label key={minutes}>
+            <input
+              type="checkbox"
+              checked={value.reminder_minutes.includes(minutes)}
+              onChange={() =>
+                setValue((v) => ({
+                  ...v,
+                  reminder_minutes: v.reminder_minutes.includes(minutes)
+                    ? v.reminder_minutes.filter((item) => item !== minutes)
+                    : [...v.reminder_minutes, minutes].sort((a, b) => b - a),
+                }))
+              }
+            />
+            {minutes === 4320
+              ? "3 days before"
+              : minutes === 1440
+                ? "1 day before"
+                : "2 hours before"}
+          </label>
+        ))}
+        <label>
+          <input
+            type="checkbox"
+            checked={value.daily_summary}
+            onChange={() => toggle("daily_summary")}
+          />{" "}
+          Daily summary
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={value.weekly_summary}
+            onChange={() => toggle("weekly_summary")}
+          />{" "}
+          Weekly summary
+        </label>
+        <label>
+          Quiet from{" "}
+          <input
+            type="time"
+            value={value.quiet_start}
+            onChange={(e) =>
+              setValue((v) => ({ ...v, quiet_start: e.target.value }))
+            }
+          />
+        </label>
+        <label>
+          until{" "}
+          <input
+            type="time"
+            value={value.quiet_end}
+            onChange={(e) =>
+              setValue((v) => ({ ...v, quiet_end: e.target.value }))
+            }
+          />
+        </label>
+      </div>
+      <div className="preference-footer">
+        <label>
+          Discord user ID
+          <input
+            value={value.discord_user_id}
+            onChange={(e) =>
+              setValue((v) => ({ ...v, discord_user_id: e.target.value }))
+            }
+            placeholder="Required for bot DMs"
+          />
+        </label>
+        <button className="button subtle small-button" onClick={subscribePush}>
+          Enable browser push
+        </button>
+        <span className="muted">
+          Email delivery requires a configured provider and may be quota
+          limited.
+        </span>
+      </div>
+      {message && <p className="preference-message">{message}</p>}
+    </section>
+  );
+}
+function AssignmentRow({
+  assignment: a,
+  course,
+  imported,
+  importTask,
+  onError,
+}: {
+  assignment: Assignment;
+  course: string;
+  imported: boolean;
+  importTask: () => void;
+  onError: (s: string) => void;
+}) {
+  const [due, setDue] = useState(
+    a.personal_due_at
+      ? format(new Date(a.personal_due_at), "yyyy-MM-dd'T'HH:mm")
+      : "",
+  );
+  const [saving, setSaving] = useState(false);
+  async function persist(value: string | null) {
+    const c = createClient();
+    if (!c) return;
+    setSaving(true);
+    const result = await c
+      .from("assignments")
+      .update({
+        personal_due_at: value ? new Date(value).toISOString() : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", a.id);
+    setSaving(false);
+    if (result.error) onError(result.error.message);
+  }
+  return (
+    <tr>
+      <td>
+        <b>{a.personal_title || a.title}</b>
+        <small>{a.personal_description || a.description}</small>
+      </td>
+      <td>{course}</td>
+      <td>
+        {a.original_due_at
+          ? format(new Date(a.original_due_at), "MMM d, yyyy")
+          : "—"}
+      </td>
+      <td>
+        <input
+          className="inline-date"
+          aria-label={`Personal deadline for ${a.title}`}
+          type="datetime-local"
+          value={due}
+          onChange={(e) => setDue(e.target.value)}
+          onBlur={() => persist(due || null)}
+        />
+        {saving && <small>Saving…</small>}
+        {a.personal_due_at && (
+          <button
+            className="text-button reset-deadline"
+            onClick={() => {
+              setDue("");
+              persist(null);
+            }}
+          >
+            Revert
+          </button>
+        )}
+      </td>
+      <td>
+        {(a.personal_completed ?? a.original_completed) ? (
+          <span className="state complete">Completed</span>
+        ) : (
+          <span className="state pending">Upcoming</span>
+        )}
+      </td>
+      <td>
+        {imported ? (
+          <span className="state complete">In tasks</span>
+        ) : (
+          <button className="button subtle small-button" onClick={importTask}>
+            Import task
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+function CoursesView({
+  courses,
+  onRefresh,
+  toast,
+  error,
+  onSettings,
+}: {
+  courses: Course[];
+  onRefresh: () => Promise<void>;
+  toast: (s: string) => void;
+  error: (s: string) => void;
+  onSettings: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  async function sync() {
+    setBusy(true);
+    const res = await fetch("/api/integrations/schoology/sync", {
+      method: "POST",
+    });
+    const json = await res.json();
+    setBusy(false);
+    if (!res.ok) {
+      setStatus(json.error || "Sync failed");
+      return;
+    }
+    setStatus(`${json.itemsSeen} assignments checked`);
+    toast("Schoology sync complete");
+    await onRefresh();
+  }
+  async function toggle(course: Course, key: "selected" | "auto_import") {
+    const c = createClient();
+    if (!c) return;
+    const result = await c
+      .from("courses")
+      .update({ [key]: !course[key], updated_at: new Date().toISOString() })
+      .eq("id", course.id);
+    if (result.error) error(result.error.message);
+    else await onRefresh();
+  }
+  async function disconnect() {
+    const res = await fetch("/api/integrations/schoology", {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      setStatus("Disconnected. Existing imported data remains available.");
+      await onRefresh();
+    } else setStatus("Could not disconnect Schoology.");
+  }
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">ACADEMICS</div>
+          <h1>Courses</h1>
+          <p>Choose which classes Daymark should keep in sync.</p>
+        </div>
+        <div className="heading-actions">
+          <a
+            className="button subtle"
+            href="/api/integrations/schoology/connect"
+          >
+            Connect Schoology
+          </a>
+          <button className="button primary" disabled={busy} onClick={sync}>
+            {busy ? "Syncing…" : "Sync courses"}
+          </button>
+        </div>
+      </div>
+      {status && <div className="notice success page-notice">{status}</div>}
+      {courses.length === 0 ? (
+        <Empty
+          icon={BookOpen}
+          title="Connect Schoology to add courses"
+          text="Course data is fetched from Schoology only after you authorize it. Consumer credentials and institutional API access are required."
+          action="Integration setup"
+          onAction={onSettings}
+        />
+      ) : (
+        <>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Course section</th>
+                  <th>Sync course</th>
+                  <th>Auto import assignments</th>
+                </tr>
+              </thead>
+              <tbody>
+                {courses.map((c) => (
+                  <tr key={c.id}>
+                    <td>
+                      <b>{c.name}</b>
+                      <small>Section {c.section_external_id || "—"}</small>
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={c.selected}
+                        onChange={() => toggle(c, "selected")}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={c.auto_import}
+                        onChange={() => toggle(c, "auto_import")}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <button className="text-button" onClick={disconnect}>
+            Disconnect Schoology (keep synced data)
+          </button>
+        </>
+      )}
+    </>
+  );
+}
+function SettingsView({
+  user,
+  onSignOut,
+}: {
+  user: { email?: string } | null;
+  onSignOut: () => void;
+}) {
+  const [theme, setTheme] = useState("dark");
+  const [timezone, setTimezone] = useState(
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+  );
+  const [displayName, setDisplayName] = useState(
+    user?.email?.split("@")[0] || "",
+  );
+  const [workdayStart, setWorkdayStart] = useState("09:00");
+  const [workdayEnd, setWorkdayEnd] = useState("17:00");
+  const [weekStartsOn, setWeekStartsOn] = useState(1);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    const c = createClient();
+    c?.from("user_preferences")
+      .select("theme,timezone,workday_start,workday_end,week_starts_on")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setTheme(data.theme);
+          setTimezone(data.timezone);
+          setWorkdayStart(data.workday_start.slice(0, 5));
+          setWorkdayEnd(data.workday_end.slice(0, 5));
+          setWeekStartsOn(data.week_starts_on);
+        }
+      });
+    c?.from("profiles")
+      .select("display_name")
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.display_name) setDisplayName(data.display_name);
+      });
+  }, []);
+  async function save() {
+    if (workdayEnd <= workdayStart) {
+      alert("Workday end must be after the start time.");
+      return;
+    }
+    const c = createClient();
+    const {
+      data: { user: u },
+    } = await c!.auth.getUser();
+    const { error } = await c!
+      .from("user_preferences")
+      .upsert({
+        user_id: u?.id,
+        theme,
+        timezone,
+        workday_start: workdayStart,
+        workday_end: workdayEnd,
+        week_starts_on: weekStartsOn,
+      });
+    const profileResult = await c!
+      .from("profiles")
+      .update({ display_name: displayName })
+      .eq("id", u?.id);
+    if (error || profileResult.error)
+      alert(error?.message || profileResult.error?.message);
+    else {
+      setSaved(true);
+      window.dispatchEvent(new CustomEvent("daymark-theme", { detail: theme }));
+      localStorage.setItem("theme", theme);
+    }
+  }
+  async function deleteAccount() {
+    if (
+      !confirm(
+        "Permanently delete your Daymark account and all of its data? This cannot be undone.",
+      )
+    )
+      return;
+    const response = await fetch("/api/account", { method: "DELETE" });
+    if (response.ok) onSignOut();
+    else {
+      const result = await response.json().catch(() => ({}));
+      alert(result.error || "Account deletion failed.");
+    }
+  }
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">MAKE IT YOURS</div>
+          <h1>Settings</h1>
+          <p>Preferences for your Daymark workspace.</p>
+        </div>
+        <button className="button primary" onClick={save}>
+          {saved ? (
+            <>
+              <Check size={14} /> Saved
+            </>
+          ) : (
+            "Save changes"
+          )}
+        </button>
+      </div>
+      <div className="settings-layout">
+        <div className="settings-nav">
+          {[
+            "General",
+            "Appearance",
+            "Calendar",
+            "Notifications",
+            "Integrations",
+            "AI",
+            "Account",
+          ].map((x) => (
+            <button className={x === "General" ? "selected" : ""} key={x}>
+              {x}
+            </button>
+          ))}
+        </div>
+        <div className="settings-content">
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h2>General</h2>
+              <p>Set the basics for how Daymark works for you.</p>
+            </div>
+            <label>
+              Display name
+              <input
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+            </label>
+            <label>
+              Timezone
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+              >
+                {[
+                  timezone,
+                  "UTC",
+                  "America/Los_Angeles",
+                  "America/New_York",
+                  "Europe/London",
+                ]
+                  .filter((x, i, a) => a.indexOf(x) === i)
+                  .map((x) => (
+                    <option key={x}>{x}</option>
+                  ))}
+              </select>
+            </label>
+          </section>
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h2>Calendar</h2>
+              <p>Set the regular working window for scheduling proposals.</p>
+            </div>
+            <div className="form-row settings-hours">
+              <label>
+                Workday starts
+                <input
+                  type="time"
+                  value={workdayStart}
+                  onChange={(e) => setWorkdayStart(e.target.value)}
+                />
+              </label>
+              <label>
+                Workday ends
+                <input
+                  type="time"
+                  value={workdayEnd}
+                  onChange={(e) => setWorkdayEnd(e.target.value)}
+                />
+              </label>
+            </div>
+            <label>
+              First day of week
+              <select
+                value={weekStartsOn}
+                onChange={(e) => setWeekStartsOn(Number(e.target.value))}
+              >
+                <option value={0}>Sunday</option>
+                <option value={1}>Monday</option>
+                <option value={6}>Saturday</option>
+              </select>
+            </label>
+          </section>
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h2>Appearance</h2>
+              <p>Choose a comfortable working environment.</p>
+            </div>
+            <div className="theme-options">
+              <button
+                className={theme === "dark" ? "chosen" : ""}
+                onClick={() => setTheme("dark")}
+              >
+                <Moon size={16} /> Dark
+              </button>
+              <button
+                className={theme === "light" ? "chosen" : ""}
+                onClick={() => setTheme("light")}
+              >
+                <Sun size={16} /> Light
+              </button>
+              <button
+                className={theme === "system" ? "chosen" : ""}
+                onClick={() => setTheme("system")}
+              >
+                <Settings2 size={16} /> System
+              </button>
+            </div>
+          </section>
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h2>Integrations</h2>
+              <p>
+                Connect optional services. Your core workspace works without
+                them.
+              </p>
+            </div>
+            <div className="integration-row">
+              <span className="integration-icon">
+                <GraduationCap size={17} />
+              </span>
+              <span>
+                <b>Schoology</b>
+                <small>
+                  Course and assignment synchronization · API credentials
+                  required
+                </small>
+              </span>
+              <span className="state neutral">Not connected</span>
+              <button
+                className="button subtle small-button"
+                onClick={() =>
+                  alert(
+                    "Configure Schoology consumer credentials and callback URL in your server environment. See INTEGRATIONS.md.",
+                  )
+                }
+              >
+                Setup
+              </button>
+            </div>
+            <div className="integration-row">
+              <span className="integration-icon">
+                <Sparkles size={17} />
+              </span>
+              <span>
+                <b>AI provider</b>
+                <small>
+                  OpenAI-compatible endpoint · local Ollama supported
+                </small>
+              </span>
+              <span className="state neutral">Optional</span>
+              <button
+                className="button subtle small-button"
+                onClick={() =>
+                  alert(
+                    "Set AI_BASE_URL, AI_API_KEY, and AI_MODEL on the server. See INTEGRATIONS.md.",
+                  )
+                }
+              >
+                Setup
+              </button>
+            </div>
+            <div className="integration-row">
+              <span className="integration-icon">
+                <Bell size={17} />
+              </span>
+              <span>
+                <b>Browser notifications</b>
+                <small>Web Push support and permission</small>
+              </span>
+              <button
+                className="button subtle small-button"
+                onClick={() =>
+                  Notification.requestPermission().then((v) =>
+                    alert(`Permission: ${v}`),
+                  )
+                }
+              >
+                Enable
+              </button>
+            </div>
+          </section>
+          <section className="settings-section">
+            <div className="settings-section-head">
+              <h2>Account</h2>
+              <p>Signed in as {user?.email}</p>
+            </div>
+            <button className="button danger-outline" onClick={onSignOut}>
+              <LogOut size={15} /> Sign out
+            </button>
+            <button className="button danger-outline" onClick={deleteAccount}>
+              Delete account and data
+            </button>
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
