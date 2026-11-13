@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useTheme } from "next-themes";
 import {
   format,
   addDays,
@@ -20,11 +21,9 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Command,
   FolderKanban,
   GraduationCap,
   LayoutDashboard,
@@ -33,6 +32,8 @@ import {
   Menu,
   Moon,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Search,
   Settings2,
@@ -43,9 +44,9 @@ import {
 } from "lucide-react";
 
 type Section =
-  | "Overview"
+  | "Today"
   | "Calendar"
-  | "My Tasks"
+  | "Tasks"
   | "Projects"
   | "Courses"
   | "Assignments"
@@ -109,16 +110,16 @@ type Proposal = {
 };
 const nav: { title: string; items: Section[] }[] = [
   {
-    title: "WORKSPACE",
-    items: ["Overview", "Calendar", "My Tasks", "Projects"],
+    title: "Personal",
+    items: ["Today", "Calendar", "Tasks", "Projects"],
   },
-  { title: "ACADEMICS", items: ["Courses", "Assignments"] },
-  { title: "TOOLS", items: ["AI Planner", "Notifications", "Settings"] },
+  { title: "Academics", items: ["Courses", "Assignments"] },
+  { title: "Tools", items: ["AI Planner", "Notifications", "Settings"] },
 ];
 const icons: Record<Section, React.ElementType> = {
-  Overview: LayoutDashboard,
+  Today: LayoutDashboard,
   Calendar: CalendarDays,
-  "My Tasks": ListTodo,
+  Tasks: ListTodo,
   Projects: FolderKanban,
   Courses: BookOpen,
   Assignments: GraduationCap,
@@ -133,8 +134,12 @@ const label = (s: string) =>
 export default function Workspace() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const [section, setSection] = useState<Section>("Overview");
+  const { resolvedTheme, setTheme } = useTheme();
+  const [section, setSection] = useState<Section>("Today");
   const [mobileNav, setMobileNav] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [user, setUser] = useState<{ id: string; email?: string } | null>(null);
   const [ready, setReady] = useState(() => !supabase);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -153,7 +158,7 @@ export default function Workspace() {
   const [plannerPrompt, setPlannerPrompt] = useState("");
   const reload = useCallback(async () => {
     if (!supabase) return;
-    const [t, p, e, a, c] = await Promise.all([
+    const [t, p, e, a, c, n] = await Promise.all([
       supabase.from("tasks").select("*").order("due_at", { ascending: true }),
       supabase
         .from("projects")
@@ -171,10 +176,15 @@ export default function Workspace() {
         .is("ignored_at", null)
         .order("original_due_at"),
       supabase.from("courses").select("*").order("name"),
+      supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .is("read_at", null),
     ]);
-    if (t.error || p.error || e.error || a.error || c.error)
+    if (t.error || p.error || e.error || a.error || c.error || n.error)
       setError(
-        (t.error || p.error || e.error || a.error || c.error)?.message ||
+        (t.error || p.error || e.error || a.error || c.error || n.error)
+          ?.message ||
           "Could not load workspace data",
       );
     setTasks((t.data || []) as Task[]);
@@ -182,7 +192,19 @@ export default function Workspace() {
     setEvents((e.data || []) as Event[]);
     setAssignments((a.data || []) as Assignment[]);
     setCourses((c.data || []) as Course[]);
+    setUnreadCount(n.count || 0);
   }, [supabase]);
+  useEffect(() => {
+    if (!mobileNav && !accountMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileNav(false);
+        setAccountMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [accountMenuOpen, mobileNav]);
   useEffect(() => {
     if (!supabase) {
       return;
@@ -276,8 +298,27 @@ export default function Workspace() {
     if (result.error) setError(result.error.message);
     else {
       setTasks((v) => [...v, result.data as Task]);
-      setToast("Assignment added to My Tasks");
+      setToast("Assignment added to Tasks");
     }
+  }
+  async function signOut() {
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) setError(error.message);
+    else router.replace("/login");
+  }
+  async function toggleTheme() {
+    const nextTheme = resolvedTheme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    window.dispatchEvent(new CustomEvent("daymark-theme", { detail: nextTheme }));
+    localStorage.setItem("theme", nextTheme);
+    if (!supabase || !user) return;
+    const { error } = await supabase
+      .from("user_preferences")
+      .update({ theme: nextTheme, updated_at: new Date().toISOString() })
+      .eq("user_id", user.id);
+    if (error)
+      setError(`Theme changed for this session but could not be saved: ${error.message}`);
   }
   async function generatePlan() {
     setPlanning(true);
@@ -372,7 +413,7 @@ export default function Workspace() {
       </div>
     );
   return (
-    <div className="app-frame">
+    <div className={`app-frame ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
         <div className="sidebar-brand">
           <div className="brand-mark small">
@@ -380,21 +421,28 @@ export default function Workspace() {
           </div>
           <b>daymark</b>
           <button
-            className="icon-button hide-desktop"
+            className="icon-button sidebar-collapse"
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            onClick={() => setSidebarCollapsed((v) => !v)}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+          </button>
+          <button
+            className="icon-button hide-desktop mobile-nav-close"
+            aria-label="Close navigation"
             onClick={() => setMobileNav(false)}
           >
             <X size={18} />
           </button>
         </div>
-        <button className="workspace-pill">
-          <div className="workspace-avatar">N</div>
+        <div className="workspace-pill" role="group" aria-label="Current workspace">
+          <div className="workspace-avatar"><CalendarDays size={15} /></div>
           <span>
             <b>Personal workspace</b>
-            <small>Free plan</small>
           </span>
-          <ChevronDown size={14} />
-        </button>
-        <nav>
+        </div>
+        <nav aria-label="Primary navigation">
           {nav.map((group) => (
             <div className="nav-group" key={group.title}>
               <div className="nav-label">{group.title}</div>
@@ -403,6 +451,14 @@ export default function Workspace() {
                 return (
                   <button
                     key={item}
+                    type="button"
+                    title={item}
+                    aria-current={section === item ? "page" : undefined}
+                    aria-label={
+                      item === "Notifications" && unreadCount > 0
+                        ? `Notifications, ${unreadCount} unread`
+                        : item
+                    }
                     onClick={() => {
                       setSection(item);
                       setMobileNav(false);
@@ -411,7 +467,11 @@ export default function Workspace() {
                   >
                     <Icon size={16} />
                     <span>{item}</span>
-                    {item === "Notifications" && <i className="unread-dot" />}
+                    {item === "Notifications" && unreadCount > 0 && (
+                      <span className="notification-count">
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -440,25 +500,62 @@ export default function Workspace() {
               }}
             />
           </div>
-          <button className="user-row">
-            <div className="user-avatar">
-              {user?.email?.[0]?.toUpperCase() || "D"}
-            </div>
-            <span>
-              <b>{user?.email?.split("@")[0] || "My account"}</b>
-              <small>{user?.email}</small>
-            </span>
-            <MoreHorizontal size={16} />
-          </button>
+          <div
+            className="account-menu-wrap"
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+                setAccountMenuOpen(false);
+            }}
+          >
+            <button
+              type="button"
+              className="user-row"
+              aria-label={`Account menu for ${user?.email || "your account"}`}
+              aria-expanded={accountMenuOpen}
+              aria-controls="account-actions"
+              onClick={() => setAccountMenuOpen((v) => !v)}
+            >
+              <div className="user-avatar">
+                {user?.email?.[0]?.toUpperCase() || "D"}
+              </div>
+              <span>
+                <b>{user?.email?.split("@")[0] || "My account"}</b>
+                <small>{user?.email}</small>
+              </span>
+              <MoreHorizontal size={16} />
+            </button>
+            {accountMenuOpen && (
+              <div className="account-popover" id="account-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSection("Settings");
+                    setAccountMenuOpen(false);
+                  }}
+                >
+                  Account and settings
+                </button>
+                <button type="button" className="sign-out-action" onClick={signOut}>
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
       {mobileNav && (
-        <div className="scrim" onClick={() => setMobileNav(false)} />
+        <button
+          type="button"
+          className="scrim"
+          aria-label="Close navigation"
+          onClick={() => setMobileNav(false)}
+        />
       )}
       <main className="main-shell">
         <header className="topbar">
           <button
             className="icon-button hide-desktop"
+            aria-label="Open navigation"
             onClick={() => setMobileNav(true)}
           >
             <Menu size={19} />
@@ -467,7 +564,7 @@ export default function Workspace() {
             {section}
             <span className="crumb-sep">/</span>
             <span>
-              {section === "Overview"
+              {section === "Today"
                 ? format(new Date(), "EEEE, MMMM d")
                 : "Personal workspace"}
             </span>
@@ -476,13 +573,11 @@ export default function Workspace() {
             <label className="searchbox">
               <Search size={15} />
               <input
-                placeholder="Search anything…"
+                aria-label="Search tasks"
+                placeholder="Search tasks…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
-              <kbd>
-                <Command size={10} /> K
-              </kbd>
             </label>
             <button
               className="button primary small-button"
@@ -492,14 +587,22 @@ export default function Workspace() {
             </button>
             <button
               className="icon-button"
-              title="Notifications"
+              aria-label="Notifications"
               onClick={() => setSection("Notifications")}
             >
               <Bell size={17} />
             </button>
             <button
+              className="icon-button theme-toggle"
+              aria-label={resolvedTheme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              title={resolvedTheme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              onClick={toggleTheme}
+            >
+              {resolvedTheme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+            </button>
+            <button
               className="user-avatar top-avatar"
-              title="Account settings"
+              aria-label="Account settings"
               onClick={() => setSection("Settings")}
             >
               {user?.email?.[0]?.toUpperCase() || "D"}
@@ -523,21 +626,21 @@ export default function Workspace() {
               </button>
             </div>
           )}
-          {section === "Overview" && (
+          {section === "Today" && (
             <>
               <div className="page-heading">
                 <div>
-                  <div className="eyebrow">YOUR OVERVIEW</div>
-                  <h1>
+                  <div className="eyebrow">YOUR DAY</div>
+                  <h1>Today</h1>
+                  <p>
                     Good{" "}
                     {new Date().getHours() < 12
                       ? "morning"
                       : new Date().getHours() < 17
                         ? "afternoon"
                         : "evening"}
-                    .
-                  </h1>
-                  <p>Here’s what’s on your plate today.</p>
+                    . Here’s what’s on your plate today.
+                  </p>
                 </div>
                 <button
                   className="button subtle"
@@ -645,7 +748,7 @@ export default function Workspace() {
                   <PanelTitle
                     title="Upcoming deadlines"
                     action="All tasks"
-                    onClick={() => setSection("My Tasks")}
+                    onClick={() => setSection("Tasks")}
                   />
                   {upcoming.length === 0 ? (
                     <Empty
@@ -660,7 +763,7 @@ export default function Workspace() {
                         <button
                           className="deadline-row"
                           key={t.id}
-                          onClick={() => setSection("My Tasks")}
+                          onClick={() => setSection("Tasks")}
                         >
                           <span className={`priority-mark ${t.priority}`} />
                           <span className="deadline-copy">
@@ -748,18 +851,18 @@ export default function Workspace() {
               </div>
             </>
           )}
-          {section === "My Tasks" && (
+          {section === "Tasks" && (
             <>
               <div className="page-heading">
                 <div>
                   <div className="eyebrow">TASK MANAGEMENT</div>
-                  <h1>My tasks</h1>
+                  <h1>Tasks</h1>
                   <p>{filtered.length} tasks across your workspace</p>
                 </div>
                 <div className="heading-actions">
-                  <button className="button subtle">
-                    <ListTodo size={15} /> Board
-                  </button>
+                  <span className="view-label">
+                    <ListTodo size={15} /> Board view
+                  </span>
                   <button
                     className="button primary"
                     onClick={() => setModal("task")}
@@ -1129,15 +1232,11 @@ export default function Workspace() {
               )}
             </>
           )}
-          {section === "Notifications" && <NotificationCenter />}
+          {section === "Notifications" && (
+            <NotificationCenter onUnreadCountChange={setUnreadCount} />
+          )}
           {section === "Settings" && (
-            <SettingsView
-              user={user}
-              onSignOut={async () => {
-                await supabase?.auth.signOut();
-                router.replace("/login");
-              }}
-            />
+            <SettingsView user={user} onSignOut={signOut} />
           )}
         </div>
       </main>
@@ -2060,7 +2159,11 @@ function CreateModal({
     </div>
   );
 }
-function NotificationCenter() {
+function NotificationCenter({
+  onUnreadCountChange,
+}: {
+  onUnreadCountChange: React.Dispatch<React.SetStateAction<number>>;
+}) {
   const [rows, setRows] = useState<
     {
       id: string;
@@ -2083,16 +2186,23 @@ function NotificationCenter() {
       });
   }, []);
   async function read(id: string) {
+    const existing = rows.find((n) => n.id === id);
+    if (!existing || existing.read_at) return;
     const c = createClient();
-    await c
-      ?.from("notifications")
+    if (!c) return;
+    const { error } = await c
+      .from("notifications")
       .update({ read_at: new Date().toISOString() })
       .eq("id", id);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    const readAt = new Date().toISOString();
     setRows((v) =>
-      v.map((n) =>
-        n.id === id ? { ...n, read_at: new Date().toISOString() } : n,
-      ),
+      v.map((n) => (n.id === id ? { ...n, read_at: readAt } : n)),
     );
+    onUnreadCountChange((count) => Math.max(0, count - 1));
   }
   return (
     <>
@@ -2652,6 +2762,14 @@ function SettingsView({
   const [workdayEnd, setWorkdayEnd] = useState("17:00");
   const [weekStartsOn, setWeekStartsOn] = useState(1);
   const [saved, setSaved] = useState(false);
+  const [activeSettingsSection, setActiveSettingsSection] = useState("General");
+  const settingsSections = [
+    "General",
+    "Calendar",
+    "Appearance",
+    "Integrations",
+    "Account",
+  ];
   useEffect(() => {
     const c = createClient();
     c?.from("user_preferences")
@@ -2672,6 +2790,14 @@ function SettingsView({
       .then(({ data }) => {
         if (data?.display_name) setDisplayName(data.display_name);
       });
+  }, []);
+  useEffect(() => {
+    const applyTheme = (event: globalThis.Event) => {
+      const nextTheme = (event as CustomEvent<string>).detail;
+      if (nextTheme) setTheme(nextTheme);
+    };
+    window.addEventListener("daymark-theme", applyTheme);
+    return () => window.removeEventListener("daymark-theme", applyTheme);
   }, []);
   async function save() {
     if (workdayEnd <= workdayStart) {
@@ -2736,22 +2862,30 @@ function SettingsView({
       </div>
       <div className="settings-layout">
         <div className="settings-nav">
-          {[
-            "General",
-            "Appearance",
-            "Calendar",
-            "Notifications",
-            "Integrations",
-            "AI",
-            "Account",
-          ].map((x) => (
-            <button className={x === "General" ? "selected" : ""} key={x}>
-              {x}
+          {settingsSections.map((name) => (
+            <button
+              type="button"
+              className={name === activeSettingsSection ? "selected" : ""}
+              aria-current={name === activeSettingsSection ? "location" : undefined}
+              key={name}
+              onClick={() => {
+                setActiveSettingsSection(name);
+                document
+                  .getElementById(`settings-${name.toLowerCase()}`)
+                  ?.scrollIntoView({
+                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                      ? "auto"
+                      : "smooth",
+                    block: "start",
+                  });
+              }}
+            >
+              {name}
             </button>
           ))}
         </div>
         <div className="settings-content">
-          <section className="settings-section">
+          <section className="settings-section" id="settings-general">
             <div className="settings-section-head">
               <h2>General</h2>
               <p>Set the basics for how Daymark works for you.</p>
@@ -2783,7 +2917,7 @@ function SettingsView({
               </select>
             </label>
           </section>
-          <section className="settings-section">
+          <section className="settings-section" id="settings-calendar">
             <div className="settings-section-head">
               <h2>Calendar</h2>
               <p>Set the regular working window for scheduling proposals.</p>
@@ -2818,7 +2952,7 @@ function SettingsView({
               </select>
             </label>
           </section>
-          <section className="settings-section">
+          <section className="settings-section" id="settings-appearance">
             <div className="settings-section-head">
               <h2>Appearance</h2>
               <p>Choose a comfortable working environment.</p>
@@ -2844,7 +2978,7 @@ function SettingsView({
               </button>
             </div>
           </section>
-          <section className="settings-section">
+          <section className="settings-section" id="settings-integrations">
             <div className="settings-section-head">
               <h2>Integrations</h2>
               <p>
@@ -2917,7 +3051,7 @@ function SettingsView({
               </button>
             </div>
           </section>
-          <section className="settings-section">
+          <section className="settings-section" id="settings-account">
             <div className="settings-section-head">
               <h2>Account</h2>
               <p>Signed in as {user?.email}</p>
