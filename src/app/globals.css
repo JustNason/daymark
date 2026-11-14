@@ -1147,6 +1147,11 @@ a {
   border-radius: var(--radius-panel);
   padding: 9px;
 }
+.task-list-view { padding: 6px 16px; }
+.task-list-row { min-height: 54px; display: grid; grid-template-columns: 24px minmax(160px, 1fr) 100px 110px 150px 32px; align-items: center; gap: 12px; border-bottom: 1px solid var(--line-soft); }
+.task-list-row:last-child { border-bottom: 0; }
+.task-list-title { border: 0; padding: 4px 0; background: none; color: var(--text-primary); text-align: left; cursor: pointer; }
+.task-list-row select { min-width: 0; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-control); background: var(--surface); color: var(--text-primary); }
 .column-title {
   display: flex;
   align-items: center;
@@ -1491,6 +1496,35 @@ a {
   font-size: var(--type-micro);
   color: var(--text-primary);
 }
+.calendar-item.calendar-deadline {
+  border-left-style: dashed;
+  color: var(--warning-text);
+}
+.time-calendar { border: 1px solid var(--line); border-radius: var(--radius-panel); overflow: hidden; background: var(--surface); }
+.time-day-head, .time-all-day { display: grid; grid-template-columns: 58px 1fr; }
+.time-day-head > div:last-child, .time-all-day > div { display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); }
+.time-calendar.day .time-day-head, .time-calendar.day .time-all-day { grid-template-columns: 58px 1fr; }
+.time-calendar.day .time-day-head > div:last-child, .time-calendar.day .time-all-day > div { grid-template-columns: 1fr; }
+.time-day-head { border-bottom: 1px solid var(--line); background: var(--surface-elevated); }
+.time-day-head > div { padding: 10px 5px; text-align: center; color: var(--text-secondary); font-size: var(--type-meta); border-left: 1px solid var(--line-soft); }
+.time-day-head > div.is-today { color: var(--accent-strong); font-weight: 700; }
+.time-all-day { border-bottom: 1px solid var(--line); min-height: 40px; }
+.time-all-day > b { padding: 8px 5px; font-size: 11px; color: var(--text-muted); }
+.all-day-items { padding: 4px; border-left: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 3px; }
+.deadline-chip { border-left: 2px dashed var(--warning); padding: 3px 5px; color: var(--warning-text); background: var(--warning-surface); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.time-scroll { display: grid; grid-template-columns: 58px 1fr; max-height: 660px; overflow: auto; }
+.time-axis { height: 1080px; display: grid; grid-template-rows: repeat(18, 60px); color: var(--text-muted); font-size: 11px; text-align: right; padding-right: 7px; }
+.time-axis > div { transform: translateY(-7px); }
+.time-columns { min-width: 0; height: 1080px; display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); }
+.time-calendar.day .time-columns { grid-template-columns: 1fr; }
+.time-day { position: relative; border-left: 1px solid var(--line-soft); }
+.time-day.today { background: color-mix(in srgb, var(--accent-muted) 18%, transparent); }
+.time-hour-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line-soft); }
+.time-event { position: absolute; z-index: 1; overflow: hidden; padding: 4px 6px; border-left: 3px solid var(--accent); border-radius: 0 4px 4px 0; background: var(--surface-elevated); font-size: 11px; display: flex; flex-direction: column; gap: 3px; }
+.time-event b, .time-event small { overflow: hidden; text-overflow: ellipsis; }
+.time-event small { color: var(--text-muted); font-size: 10px; }
+.current-time-line { z-index: 2; position: absolute; left: 0; right: 0; border-top: 2px solid var(--danger); color: var(--danger); font-size: 10px; }
+.current-time-line i { position: absolute; left: -4px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
 .cell-add {
   position: absolute;
   right: 3px;

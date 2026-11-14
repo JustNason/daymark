@@ -6,6 +6,8 @@ import { useTheme } from "next-themes";
 import {
   format,
   addDays,
+  addMonths,
+  subMonths,
   startOfWeek,
   startOfMonth,
   eachDayOfInterval,
@@ -90,6 +92,13 @@ type Event = {
   category: string;
   description: string;
 };
+type WorkSession = {
+  id: string;
+  task_id: string;
+  starts_at: string;
+  ends_at: string;
+  status: "planned" | "done" | "skipped";
+};
 type Assignment = {
   id: string;
   title: string;
@@ -130,6 +139,21 @@ const icons: Record<Section, React.ElementType> = {
 const statuses = ["backlog", "todo", "in_progress", "in_review", "completed"];
 const label = (s: string) =>
   s.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+const dateInTimezone = (date: Date, timezone: string) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+const sameZonedDay = (instant: string | Date, date: Date, timezone: string) => dateInTimezone(new Date(instant), timezone) === dateInTimezone(date, timezone);
+const zonedTime = (instant: string | Date, timezone: string) => new Intl.DateTimeFormat(undefined, { timeZone: timezone, hour: "numeric", minute: "2-digit" }).format(new Date(instant));
+const zonedMidnight = (date: Date, timezone: string) => {
+  const [year, month, day] = dateInTimezone(date, timezone).split("-").map(Number);
+  const target = Date.UTC(year, month - 1, day);
+  let instant = new Date(target);
+  for (let i = 0; i < 3; i++) {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric", hourCycle: "h23" }).formatToParts(instant);
+    const values = Object.fromEntries(parts.map((part) => [part.type, Number(part.value)]));
+    instant = new Date(instant.getTime() + target - Date.UTC(values.year, values.month - 1, values.day, values.hour, values.minute, values.second));
+  }
+  return instant;
+};
 
 export default function Workspace() {
   const router = useRouter();
@@ -145,20 +169,25 @@ export default function Workspace() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  const [workSessions, setWorkSessions] = useState<WorkSession[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [search, setSearch] = useState("");
+  const [taskView, setTaskView] = useState<"Board" | "List">("Board");
   const [modal, setModal] = useState<"task" | "event" | "project" | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [date, setDate] = useState(new Date());
+  const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [planning, setPlanning] = useState(false);
   const [plannerPrompt, setPlannerPrompt] = useState("");
   const reload = useCallback(async () => {
     if (!supabase) return;
-    const [t, p, e, a, c, n] = await Promise.all([
+    const rangeStart = new Date();
+    const rangeEnd = addDays(rangeStart, 45);
+    const [t, p, e, a, c, n, s, pref] = await Promise.all([
       supabase.from("tasks").select("*").order("due_at", { ascending: true }),
       supabase
         .from("projects")
@@ -180,19 +209,42 @@ export default function Workspace() {
         .from("notifications")
         .select("id", { count: "exact", head: true })
         .is("read_at", null),
+      supabase
+        .from("scheduled_work_sessions")
+        .select("id,task_id,starts_at,ends_at,status")
+        .eq("status", "planned")
+        .gte("ends_at", rangeStart.toISOString())
+        .lte("starts_at", rangeEnd.toISOString())
+        .order("starts_at"),
+      supabase.from("user_preferences").select("timezone").maybeSingle(),
     ]);
-    if (t.error || p.error || e.error || a.error || c.error || n.error)
+    if (t.error || p.error || e.error || a.error || c.error || n.error || s.error || pref.error)
       setError(
-        (t.error || p.error || e.error || a.error || c.error || n.error)
+        (t.error || p.error || e.error || a.error || c.error || n.error || s.error || pref.error)
           ?.message ||
           "Could not load workspace data",
       );
     setTasks((t.data || []) as Task[]);
     setProjects((p.data || []) as Project[]);
     setEvents((e.data || []) as Event[]);
+    setWorkSessions((s.data || []) as WorkSession[]);
     setAssignments((a.data || []) as Assignment[]);
     setCourses((c.data || []) as Course[]);
     setUnreadCount(n.count || 0);
+    if (pref.data?.timezone) setTimezone(pref.data.timezone);
+  }, [supabase]);
+  const loadCalendarRange = useCallback(async (from: Date, to: Date) => {
+    if (!supabase) return;
+    const [eventResult, sessionResult] = await Promise.all([
+      supabase.from("calendar_events").select("*").gte("ends_at", from.toISOString()).lt("starts_at", to.toISOString()).order("starts_at"),
+      supabase.from("scheduled_work_sessions").select("id,task_id,starts_at,ends_at,status").eq("status", "planned").gte("ends_at", from.toISOString()).lt("starts_at", to.toISOString()).order("starts_at"),
+    ]);
+    if (eventResult.error || sessionResult.error) {
+      setError((eventResult.error || sessionResult.error)?.message || "Could not load calendar items");
+      return;
+    }
+    setEvents((eventResult.data || []) as Event[]);
+    setWorkSessions((sessionResult.data || []) as WorkSession[]);
   }, [supabase]);
   useEffect(() => {
     if (!mobileNav && !accountMenuOpen) return;
@@ -359,7 +411,7 @@ export default function Workspace() {
     (t) =>
       t.status !== "completed" &&
       t.due_at &&
-      isSameDay(new Date(t.due_at), new Date()),
+      sameZonedDay(t.due_at!, new Date(), timezone),
   );
   const upcoming = tasks
     .filter(
@@ -370,6 +422,11 @@ export default function Workspace() {
     )
     .slice(0, 5);
   const done = tasks.filter((t) => t.status === "completed").length;
+  const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+  const weekEnd = addDays(weekStart, 7);
+  const todayEvents = events.filter((e) => sameZonedDay(e.starts_at, new Date(), timezone));
+  const todaySessions = workSessions.filter((s) => sameZonedDay(s.starts_at, new Date(), timezone));
+  const scheduledToday = todayEvents.length + todaySessions.length;
   if (!ready)
     return (
       <div className="loading">
@@ -480,23 +537,13 @@ export default function Workspace() {
         </nav>
         <div className="sidebar-bottom">
           <div className="storage-label">
-            <span>Weekly focus</span>
-            <span>
-              {Math.min(
-                100,
-                Math.round(
-                  (tasks.filter((t) => t.status === "completed").length /
-                    Math.max(1, tasks.length)) *
-                    100,
-                ),
-              )}
-              %
-            </span>
+            <span>Planned this week</span>
+            <span>{workSessions.filter((s) => new Date(s.starts_at) >= weekStart && new Date(s.starts_at) < weekEnd).length}</span>
           </div>
           <div className="progress-track">
             <i
               style={{
-                width: `${Math.min(100, Math.round((done / Math.max(1, tasks.length)) * 100))}%`,
+                width: `${Math.min(100, workSessions.filter((s) => new Date(s.starts_at) >= weekStart && new Date(s.starts_at) < weekEnd).length * 10)}%`,
               }}
             />
           </div>
@@ -658,11 +705,9 @@ export default function Workspace() {
                 />
                 <Metric
                   label="In progress"
-                  value={String(
-                    tasks.filter((t) => t.status === "in_progress").length,
-                  ).padStart(2, "0")}
-                  detail="currently underway"
-                  icon={Activity}
+                  value={String(scheduledToday).padStart(2, "0")}
+                  detail="events and work sessions"
+                  icon={CalendarDays}
                 />
                 <Metric
                   label="Completed"
@@ -686,9 +731,7 @@ export default function Workspace() {
                     action="View calendar"
                     onClick={() => setSection("Calendar")}
                   />
-                  {events.filter((e) =>
-                    isSameDay(new Date(e.starts_at), new Date()),
-                  ).length === 0 && todayTasks.length === 0 ? (
+                  {todayEvents.length === 0 && todayTasks.length === 0 && todaySessions.length === 0 ? (
                     <Empty
                       compact
                       icon={Clock3}
@@ -698,22 +741,9 @@ export default function Workspace() {
                   ) : (
                     <div className="timeline">
                       {[
-                        ...events
-                          .filter((e) =>
-                            isSameDay(new Date(e.starts_at), new Date()),
-                          )
-                          .map((e) => ({
-                            title: e.title,
-                            time: e.starts_at,
-                            color: e.color,
-                            type: "event",
-                          })),
-                        ...todayTasks.map((t) => ({
-                          title: t.title,
-                          time: t.due_at!,
-                          color: "#f0a85b",
-                          type: "task",
-                        })),
+                        ...todayEvents.map((e) => ({ title: e.title, time: e.starts_at, color: e.color, type: "Calendar event" })),
+                        ...todaySessions.map((s) => ({ title: tasks.find((t) => t.id === s.task_id)?.title || "Planned work", time: s.starts_at, color: "var(--accent)", type: "Work session" })),
+                        ...todayTasks.map((t) => ({ title: t.title, time: t.due_at!, color: "var(--warning)", type: "Task deadline" })),
                       ]
                         .sort((a, b) => +new Date(a.time) - +new Date(b.time))
                         .map((item, i) => (
@@ -721,16 +751,14 @@ export default function Workspace() {
                             className="timeline-row"
                             key={`${item.type}${i}`}
                           >
-                            <time>{format(new Date(item.time), "h:mm a")}</time>
+                            <time>{zonedTime(item.time, timezone)}</time>
                             <div className="timeline-line">
                               <i style={{ background: item.color }} />
                             </div>
                             <div>
                               <b>{item.title}</b>
                               <small>
-                                {item.type === "event"
-                                  ? "Calendar event"
-                                  : "Task deadline"}
+                                {item.type}
                               </small>
                             </div>
                           </div>
@@ -860,9 +888,9 @@ export default function Workspace() {
                   <p>{filtered.length} tasks across your workspace</p>
                 </div>
                 <div className="heading-actions">
-                  <span className="view-label">
-                    <ListTodo size={15} /> Board view
-                  </span>
+                  <div className="view-switch" aria-label="Task view">
+                    {(["Board", "List"] as const).map((view) => <button key={view} type="button" className={taskView === view ? "selected" : ""} aria-pressed={taskView === view} onClick={() => setTaskView(view)}>{view}</button>)}
+                  </div>
                   <button
                     className="button primary"
                     onClick={() => setModal("task")}
@@ -871,7 +899,7 @@ export default function Workspace() {
                   </button>
                 </div>
               </div>
-              <div className="task-board">
+              {taskView === "Board" ? <div className="task-board">
                 {statuses.map((status) => (
                   <div
                     className="task-column"
@@ -926,7 +954,16 @@ export default function Workspace() {
                     </button>
                   </div>
                 ))}
-              </div>
+              </div> : <div className="panel task-list-view">
+                {filtered.length === 0 ? <Empty icon={ListTodo} title="No tasks match" text="Add a task or adjust your search." /> : filtered.map((task) => <div className="task-list-row" key={task.id}>
+                  <button className={`status-dot ${task.status}`} aria-label={`Mark ${task.title} complete`} onClick={() => updateTask(task.id, { status: task.status === "completed" ? "todo" : "completed" })} />
+                  <button className="task-list-title" onClick={() => setEditingTask(task)}>{task.title}</button>
+                  <span className={`priority ${task.priority}`}>{label(task.priority)}</span>
+                  <span>{task.due_at ? format(new Date(task.due_at), "MMM d") : "No deadline"}</span>
+                  <select aria-label={`Status for ${task.title}`} value={task.status} onChange={(event) => updateTask(task.id, { status: event.target.value })}>{statuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select>
+                  <button className="icon-button mini" onClick={() => removeTask(task.id)} aria-label={`Delete ${task.title}`}><Trash2 size={14} /></button>
+                </div>)}
+              </div>}
             </>
           )}
           {section === "Projects" && (
@@ -1034,7 +1071,11 @@ export default function Workspace() {
               date={date}
               setDate={setDate}
               events={events}
+              workSessions={workSessions}
               tasks={tasks}
+              assignments={assignments}
+              timezone={timezone}
+              loadRange={loadCalendarRange}
               addEvent={() => setModal("event")}
             />
           )}
@@ -1447,16 +1488,29 @@ function CalendarView({
   date,
   setDate,
   events,
+  workSessions,
   tasks,
+  assignments,
+  timezone,
+  loadRange,
   addEvent,
 }: {
   date: Date;
   setDate: (d: Date) => void;
   events: Event[];
+  workSessions: WorkSession[];
   tasks: Task[];
+  assignments: Assignment[];
+  timezone: string;
+  loadRange: (from: Date, to: Date) => Promise<void>;
   addEvent: () => void;
 }) {
   const [view, setView] = useState<"Month" | "Week" | "Day" | "Agenda">("Week");
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const start =
     view === "Month"
       ? startOfWeek(startOfMonth(date), { weekStartsOn: 1 })
@@ -1467,13 +1521,29 @@ function CalendarView({
       : view === "Day"
         ? [date]
         : Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  useEffect(() => {
+    const visibleStart = view === "Month" ? start : view === "Day" ? date : start;
+    const visibleEnd = view === "Month" ? addDays(start, 42) : view === "Day" ? addDays(date, 1) : addDays(start, 7);
+    void loadRange(zonedMidnight(visibleStart, timezone), zonedMidnight(visibleEnd, timezone));
+  }, [date, loadRange, start, timezone, view]);
   const entries = [
     ...events.map((e) => ({
       id: e.id,
       title: e.title,
       time: e.starts_at,
+      end: e.ends_at,
       color: e.color,
       kind: "Event",
+      deadline: false,
+    })),
+    ...workSessions.map((s) => ({
+      id: s.id,
+      title: tasks.find((t) => t.id === s.task_id)?.title || "Planned work",
+      time: s.starts_at,
+      end: s.ends_at,
+      color: "var(--accent)",
+      kind: "Work session",
+      deadline: false,
     })),
     ...tasks
       .filter((t) => t.due_at && t.status !== "completed")
@@ -1481,12 +1551,18 @@ function CalendarView({
         id: t.id,
         title: t.title,
         time: t.due_at!,
-        color: "#f0a85b",
-        kind: "Task",
+        end: null,
+        color: "var(--warning)",
+        kind: "Task deadline",
+        deadline: true,
       })),
   ];
-  const shift = () =>
-    setDate(addDays(date, view === "Month" ? 30 : view === "Day" ? 1 : 7));
+  const assignmentEntries = assignments.filter((a) => (a.personal_due_at || a.original_due_at) && !(a.personal_completed ?? a.original_completed)).map((a) => ({
+    id: a.id, title: a.personal_title || a.title, time: a.personal_due_at || a.original_due_at!, end: null,
+    color: "var(--info)", kind: "Assignment deadline", deadline: true,
+  }));
+  const allEntries = [...entries, ...assignmentEntries];
+  const moveDate = (direction: -1 | 1) => setDate(view === "Month" ? (direction > 0 ? addMonths(date, 1) : subMonths(date, 1)) : addDays(date, direction * (view === "Day" ? 1 : 7)));
   return (
     <>
       <div className="page-heading calendar-heading">
@@ -1509,18 +1585,11 @@ function CalendarView({
           </button>
           <button
             className="icon-button"
-            onClick={() =>
-              setDate(
-                addDays(
-                  date,
-                  -(view === "Month" ? 30 : view === "Day" ? 1 : 7),
-                ),
-              )
-            }
+            onClick={() => moveDate(-1)}
           >
             <ChevronLeft size={17} />
           </button>
-          <button className="icon-button" onClick={shift}>
+          <button className="icon-button" onClick={() => moveDate(1)}>
             <ChevronRight size={17} />
           </button>
           <h2>{format(date, view === "Day" ? "MMMM d, yyyy" : "MMMM yyyy")}</h2>
@@ -1539,7 +1608,7 @@ function CalendarView({
       </div>
       {view === "Agenda" ? (
         <div className="panel agenda-list">
-          {entries
+          {allEntries
             .filter(
               (e) =>
                 new Date(e.time) >= startOfWeek(date, { weekStartsOn: 1 }) &&
@@ -1555,7 +1624,7 @@ function CalendarView({
                 <small>{e.kind}</small>
               </div>
             ))}
-          {entries.length === 0 && (
+          {allEntries.length === 0 && (
             <Empty
               icon={CalendarDays}
               title="No scheduled items"
@@ -1563,7 +1632,7 @@ function CalendarView({
             />
           )}
         </div>
-      ) : (
+      ) : view === "Month" ? (
         <div className={`calendar-grid ${view.toLowerCase()}`}>
           <div className="calendar-weekdays">
             {days.map((d) => (
@@ -1572,7 +1641,7 @@ function CalendarView({
           </div>
           <div className="calendar-cells">
             {days.map((d) => {
-              const dayEntries = entries.filter((e) =>
+              const dayEntries = allEntries.filter((e) =>
                 isSameDay(new Date(e.time), d),
               );
               return (
@@ -1582,17 +1651,16 @@ function CalendarView({
                   onDoubleClick={addEvent}
                 >
                   <span className="cell-date">
-                    {view !== "Day" && format(d, "d")}
-                    {view === "Day" && format(d, "EEEE, MMMM d")}
+                    {format(d, "d")}
                   </span>
                   {dayEntries.slice(0, view === "Month" ? 3 : 8).map((e) => (
                     <div
-                      className="calendar-item"
+                      className={`calendar-item ${e.deadline ? "calendar-deadline" : ""}`}
                       key={e.id}
                       style={{ borderLeftColor: e.color }}
                       title={e.title}
                     >
-                      {format(new Date(e.time), "h:mm")} {e.title}
+                      {e.deadline ? "Due · " : `${format(new Date(e.time), "h:mm")} · `}{e.title}
                     </div>
                   ))}
                   {dayEntries.length > 3 && view === "Month" && (
@@ -1607,6 +1675,33 @@ function CalendarView({
               );
             })}
           </div>
+        </div>
+      ) : (
+        <div className={`time-calendar ${view.toLowerCase()}`}>
+          <div className="time-day-head"><div />{days.map((day) => <div key={day.toISOString()} className={isSameDay(day, now) ? "is-today" : ""}>{format(day, "EEE d")}</div>)}</div>
+          <div className="time-all-day"><b>All day</b><div>{days.map((day) => <div key={day.toISOString()} className="all-day-items">{allEntries.filter((entry) => entry.deadline && isSameDay(new Date(entry.time), day)).map((entry) => <span key={entry.id} title={entry.title} className="deadline-chip">{entry.kind}: {entry.title}</span>)}</div>)}</div></div>
+          <div className="time-scroll"><div className="time-axis">{Array.from({ length: 18 }, (_, i) => i + 6).map((hour) => <div key={hour}>{format(new Date(2000, 0, 1, hour), "h a")}</div>)}</div><div className="time-columns">{days.map((day) => {
+            const dayEntries = allEntries.filter((entry) => !entry.deadline && isSameDay(new Date(entry.time), day)).sort((a, b) => +new Date(a.time) - +new Date(b.time));
+            const lanes: number[] = [];
+            const positioned = dayEntries.map((entry) => {
+              const startAt = new Date(entry.time);
+              const startMinute = Math.max(360, startAt.getHours() * 60 + startAt.getMinutes());
+              const endAt = new Date(entry.end || new Date(+startAt + 30 * 60_000));
+              const endMinute = Math.min(1440, Math.max(startMinute + 24, endAt.getHours() * 60 + endAt.getMinutes()));
+              let lane = lanes.findIndex((laneEnd) => laneEnd <= startMinute);
+              if (lane < 0) lane = lanes.length;
+              lanes[lane] = endMinute;
+              return { entry, startMinute, endMinute, lane };
+            });
+            const laneCount = Math.max(1, lanes.length);
+            const showNow = isSameDay(day, now) && now.getHours() >= 6 && now.getHours() < 24;
+            const nowTop = ((now.getHours() * 60 + now.getMinutes() - 360) / 1080) * 100;
+            return <div className={`time-day ${isSameDay(day, now) ? "today" : ""}`} key={day.toISOString()} onDoubleClick={addEvent}>
+              {Array.from({ length: 18 }, (_, i) => <div className="time-hour-line" key={i} style={{ top: `${(i / 18) * 100}%` }} />)}
+              {positioned.map(({ entry, startMinute, endMinute, lane }) => <div className="time-event" key={entry.id} title={`${entry.kind}: ${entry.title}`} style={{ top: `${((startMinute - 360) / 1080) * 100}%`, height: `${Math.max(2.3, ((endMinute - startMinute) / 1080) * 100)}%`, left: `calc(${(lane / laneCount) * 100}% + 2px)`, width: `calc(${100 / laneCount}% - 4px)`, borderLeftColor: entry.color }}><b>{entry.title}</b><small>{format(new Date(entry.time), "h:mm a")}–{format(new Date(entry.end || new Date(+new Date(entry.time) + 30 * 60_000)), "h:mm a")}</small></div>)}
+              {showNow && <div className="current-time-line" style={{ top: `${nowTop}%` }}><i />{format(now, "h:mm a")}</div>}
+            </div>;
+          })}</div></div>
         </div>
       )}
     </>
