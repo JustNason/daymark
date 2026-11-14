@@ -1510,8 +1510,9 @@ a {
 .time-calendar.day .time-day-head, .time-calendar.day .time-all-day { grid-template-columns: 58px 1fr; }
 .time-calendar.day .time-day-head > div:last-child, .time-calendar.day .time-all-day > div { grid-template-columns: 1fr; }
 .time-day-head { border-bottom: 1px solid var(--line); background: var(--surface-elevated); }
-.time-day-head > div { padding: 10px 5px; text-align: center; color: var(--text-secondary); font-size: var(--type-meta); border-left: 1px solid var(--line-soft); }
-.time-day-head > div.is-today { color: var(--accent-strong); font-weight: 700; }
+.time-day-head > div:last-child { padding: 0; border: 0; }
+.time-day-head > div:last-child > div { padding: 10px 5px; text-align: center; color: var(--text-secondary); font-size: var(--type-meta); border-left: 1px solid var(--line-soft); }
+.time-day-head > div:last-child > div.is-today { color: var(--accent-strong); font-weight: 700; }
 .time-all-day { border-bottom: 1px solid var(--line); min-height: 40px; }
 .time-all-day > b { padding: 8px 5px; font-size: 11px; color: var(--text-muted); }
 .all-day-items { padding: 4px; border-left: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 3px; }
@@ -1527,6 +1528,8 @@ a {
 .time-event { position: absolute; z-index: 1; overflow: hidden; padding: 4px 6px; border-left: 3px solid var(--accent); border-radius: 0 4px 4px 0; background: var(--surface-elevated); font-size: 11px; display: flex; flex-direction: column; gap: 3px; }
 .time-event b, .time-event small { overflow: hidden; text-overflow: ellipsis; }
 .time-event small { color: var(--text-muted); font-size: 10px; }
+.time-event.compact { justify-content: center; padding-top: 1px; padding-bottom: 1px; }
+.time-event.compact small { display: none; }
 .current-time-line { z-index: 2; position: absolute; left: 0; right: 0; border-top: 2px solid var(--danger); color: var(--danger); font-size: 10px; }
 .current-time-line i { position: absolute; left: -4px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
 .cell-add {

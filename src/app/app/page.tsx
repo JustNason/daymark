@@ -1593,10 +1593,13 @@ function CalendarView({
     media.addEventListener("change", applyNarrowFallback);
     return () => media.removeEventListener("change", applyNarrowFallback);
   }, []);
-  const start =
-    view === "Month"
-      ? startOfWeek(startOfMonth(date), { weekStartsOn: 1 })
-      : startOfWeek(date, { weekStartsOn: 1 });
+  const start = useMemo(
+    () =>
+      view === "Month"
+        ? startOfWeek(startOfMonth(date), { weekStartsOn: 1 })
+        : startOfWeek(date, { weekStartsOn: 1 }),
+    [date, view],
+  );
   const days =
     view === "Month"
       ? eachDayOfInterval({ start, end: addDays(start, 41) })
@@ -1760,7 +1763,7 @@ function CalendarView({
         </div>
       ) : (
         <div className={`time-calendar ${view.toLowerCase()}`}>
-          <div className="time-day-head"><div />{days.map((day) => <div key={day.toISOString()} className={isSameDay(day, now) ? "is-today" : ""}>{format(day, "EEE d")}</div>)}</div>
+          <div className="time-day-head"><div /><div>{days.map((day) => <div key={day.toISOString()} className={isSameDay(day, now) ? "is-today" : ""}>{format(day, "EEE d")}</div>)}</div></div>
           <div className="time-all-day"><b>All day</b><div>{days.map((day) => <div key={day.toISOString()} className="all-day-items">{allEntries.filter((entry) => entry.deadline && sameZonedDay(entry.time, day, timezone)).map((entry) => <span key={entry.id} title={entry.title} className="deadline-chip">{entry.kind}: {entry.title}</span>)}</div>)}</div></div>
           <div className="time-scroll"><div className="time-axis">{Array.from({ length: 18 }, (_, i) => i + 6).map((hour) => <div key={hour}>{format(new Date(2000, 0, 1, hour), "h a")}</div>)}</div><div className="time-columns">{days.map((day) => {
             const dayStart = zonedMidnight(day, timezone);
@@ -1785,7 +1788,7 @@ function CalendarView({
             const nowTop = ((nowParts.hour * 60 + nowParts.minute - 360) / 1080) * 100;
             return <div className={`time-day ${isSameDay(day, now) ? "today" : ""}`} key={day.toISOString()} onDoubleClick={addEvent}>
               {Array.from({ length: 18 }, (_, i) => <div className="time-hour-line" key={i} style={{ top: `${(i / 18) * 100}%` }} />)}
-              {positioned.map(({ entry, startMinute, endMinute, lane }) => <div className="time-event" key={entry.id} title={`${entry.kind}: ${entry.title}`} style={{ top: `${((startMinute - 360) / 1080) * 100}%`, height: `${Math.max(2.3, ((endMinute - startMinute) / 1080) * 100)}%`, left: `calc(${(lane / laneCount) * 100}% + 2px)`, width: `calc(${100 / laneCount}% - 4px)`, borderLeftColor: entry.color }}><b>{entry.title}</b><small>{zonedTime(entry.time, timezone)}–{zonedTime(entry.end || new Date(+new Date(entry.time) + 30 * 60_000), timezone)}</small></div>)}
+              {positioned.map(({ entry, startMinute, endMinute, lane }) => <div className={`time-event ${endMinute - startMinute < 40 ? "compact" : ""}`} key={entry.id} title={`${entry.kind}: ${entry.title}`} style={{ top: `${((startMinute - 360) / 1080) * 100}%`, height: `${Math.max(2.3, ((endMinute - startMinute) / 1080) * 100)}%`, left: `calc(${(lane / laneCount) * 100}% + 2px)`, width: `calc(${100 / laneCount}% - 4px)`, borderLeftColor: entry.color }}><b>{entry.title}</b><small>{zonedTime(entry.time, timezone)}–{zonedTime(entry.end || new Date(+new Date(entry.time) + 30 * 60_000), timezone)}</small></div>)}
               {showNow && <div className="current-time-line" style={{ top: `${nowTop}%` }}><i />{format(now, "h:mm a")}</div>}
             </div>;
           })}</div></div>
