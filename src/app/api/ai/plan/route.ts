@@ -4,6 +4,13 @@ import { addDays } from "date-fns";
 import { createClient } from "@/lib/supabase/server";
 import { planWork } from "@/lib/scheduling";
 const inputSchema = z.object({ prompt: z.string().max(2000).optional() });
+export async function GET() {
+  const client = await createClient();
+  if (!client) return NextResponse.json({ error: "Supabase is not configured" }, { status: 503 });
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  return NextResponse.json({ configured: Boolean(process.env.AI_BASE_URL && process.env.AI_MODEL) });
+}
 export async function POST(request: Request) {
   const c = await createClient();
   if (!c)
