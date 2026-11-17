@@ -2437,7 +2437,7 @@ function NotificationCenter({
               onClick={() => read(n.id)}
             >
               <span className="notification-icon">
-                <Bell size={15} />
+                <NotificationKindIcon kind={n.kind} />
               </span>
               <span>
                 <b>{n.title}</b>
@@ -3257,13 +3257,13 @@ function SettingsView({
               <span className="muted">Set AI_BASE_URL and AI_MODEL on the server.</span>
             </div>
             <div className="integration-row" id="settings-discord">
-              <span className="integration-icon">
-                <Sparkles size={17} />
+              <span className="integration-icon" style={{ color: "#5865f2" }}>
+                <DiscordIcon size={17} />
               </span>
               <span>
-                <b>AI provider</b>
+                <b>Discord</b>
                 <small>
-                  OpenAI-compatible endpoint · local Ollama supported
+                  Link your Discord account for notifications and DMs.
                 </small>
               </span>
               <span className={`state ${discordIntegration?.status === "connected" ? "complete" : "neutral"}`}>{discordIntegration?.status ? label(discordIntegration.status) : "Not linked"}</span>
@@ -3306,4 +3306,39 @@ function SettingsView({
       </div>
     </>
   );
+}
+
+function DiscordIcon({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-label="Discord"
+      style={style}
+    >
+      <path d="M7 7a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V7z" />
+      <path d="M17 7a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V7z" />
+      <path d="M12 18v-6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v6" />
+    </svg>
+  );
+}
+
+function NotificationKindIcon({ kind }: { kind: string }) {
+  const icons: Record<string, React.ElementType> = {
+    assignment: GraduationCap,
+    calendar: CalendarDays,
+    event: CalendarDays,
+    reminder: Clock3,
+    work_session: Clock3,
+    discord: DiscordIcon,
+  };
+  const Icon = icons[(kind || "").toLowerCase()] || Bell;
+  return <Icon size={15} />;
 }

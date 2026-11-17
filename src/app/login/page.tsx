@@ -4,6 +4,28 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { CalendarDays, ArrowRight, LoaderCircle } from "lucide-react";
+
+function DiscordIcon({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-label="Discord"
+      style={style}
+    >
+      <path d="M7 7a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V7z" />
+      <path d="M17 7a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V7z" />
+      <path d="M12 18v-6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v6" />
+    </svg>
+  );
+}
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -134,6 +156,7 @@ export default function LoginPage() {
               onClick={() => oauth("discord")}
               disabled={busy}
             >
+              <DiscordIcon size={15} style={{ color: "#5865f2" }} />
               Discord
             </button>
           </div>
