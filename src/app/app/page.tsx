@@ -3257,7 +3257,7 @@ function SettingsView({
               <span className="muted">Set AI_BASE_URL and AI_MODEL on the server.</span>
             </div>
             <div className="integration-row" id="settings-discord">
-              <span className="integration-icon" style={{ color: "#5865f2" }}>
+              <span className="integration-icon">
                 <DiscordIcon size={17} />
               </span>
               <span>
@@ -3315,6 +3315,7 @@ function DiscordIcon({ size = 16, style }: { size?: number; style?: React.CSSPro
       height={size}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
       aria-label="Discord"
       style={style}
     >

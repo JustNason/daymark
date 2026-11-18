@@ -12,6 +12,7 @@ function DiscordIcon({ size = 16, style }: { size?: number; style?: React.CSSPro
       height={size}
       viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
       aria-label="Discord"
       style={style}
     >
@@ -149,7 +150,7 @@ export default function LoginPage() {
               onClick={() => oauth("discord")}
               disabled={busy}
             >
-              <DiscordIcon size={15} style={{ color: "#5865f2" }} />
+              <DiscordIcon size={15} />
               Discord
             </button>
           </div>
