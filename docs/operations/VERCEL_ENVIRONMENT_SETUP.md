@@ -8,14 +8,19 @@ Production branch: `master`
 
 ## Current setup
 
-The following core variables are already configured in Vercel for Development, Preview, and Production:
+Observed by live endpoint checks on **2026-11-17** against `https://daymark-universeftc.vercel.app` (preview) and `https://daymark-virid-two.vercel.app` (production). Status labels below describe environment configuration only, not working integrations.
 
-| Variable                        | Use                                         | Visibility                       |
-| ------------------------------- | ------------------------------------------- | -------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase project API URL                    | Public; included in browser code |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase publishable key used by the client | Public; included in browser code |
+| Variable(s)                        | Observed state                                                                                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Configured in both environments (app signs in and loads data) — **Implemented**                                                    |
+| `DISCORD_BOT_TOKEN`                | Configured in both environments (test endpoint passes the configuration check) — **Configuration required → partially verified**            |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Configured in both environments (OAuth authorize redirect starts) — **Partially implemented**                                      |
+| `DISCORD_REDIRECT_URI`             | Preview environment points at `https://daymark-virid-two.vercel.app/...` (production host) — **Broken** from the preview host; production matches its own host |
+| `SCHOOLOGY_CONSUMER_KEY`, `SCHOOLOGY_CONSUMER_SECRET` | Configured in both environments (connect endpoint passes the configuration check) — **Broken** (API returns 405, see [INTEGRATIONS.md](INTEGRATIONS.md)) |
+| `AI_BASE_URL`, `AI_MODEL`          | Not configured in either environment (`GET /api/ai/plan` reports `configured: false`) — deterministic planner only                            |
+| `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, VAPID, `EMAIL_*` | **Not verified** from outside; behavior not distinguishable without invoking privileged or destructive paths                |
 
-No optional provider variables are currently configured. Do not add empty values or example placeholders. A missing optional variable keeps that feature disabled while the core app remains usable.
+Two live deployments exist: `daymark-virid-two.vercel.app` (public; cron route reachable) and `daymark-universeftc.vercel.app` (behind Vercel Deployment Protection — non-browser requests get a Vercel SSO redirect). Environment variables are scoped per deployment environment, so verify each host separately. Do not add empty values or example placeholders. A missing optional variable keeps that feature disabled while the core app remains usable.
 
 ## Add or update variables in Vercel
 
@@ -57,7 +62,7 @@ To enable scheduled reminders:
 
 1. Add `SUPABASE_SERVICE_ROLE_KEY` and `CRON_SECRET` to Vercel Production as sensitive variables.
 2. In Supabase, enable the `pg_cron`, `pg_net`, and Vault extensions.
-3. Open [`supabase/cron/notifications.sql`](supabase/cron/notifications.sql). Replace `https://YOUR_DAYMARK_DOMAIN` with the production URL and `YOUR_CRON_SECRET` with the same value saved in Vercel. Run the SQL once in the Supabase SQL Editor.
+3. Open [`supabase/cron/notifications.sql`](../../supabase/cron/notifications.sql). Replace `https://YOUR_DAYMARK_DOMAIN` with the production URL and `YOUR_CRON_SECRET` with the same value saved in Vercel. Run the SQL once in the Supabase SQL Editor.
 4. Check Supabase Cron job history and Vercel function logs for a successful request.
 
 Daymark checks the `Authorization: Bearer <CRON_SECRET>` header itself. Vercel also currently protects the project's non-custom domains with Vercel Authentication. If that protection blocks Supabase Cron before the request reaches Daymark, use a custom domain that is excluded from that protection for the Cron URL, or configure a Vercel protection bypass for the job. Keep Daymark's `CRON_SECRET` check enabled either way. See [Supabase Cron](https://supabase.com/docs/guides/cron) and [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection).
@@ -140,7 +145,7 @@ Keep these server-only and sensitive:
 - `VAPID_PRIVATE_KEY`
 - `EMAIL_API_KEY`
 
-Public/client values are `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `VAPID_PUBLIC_KEY`, and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`. `EMAIL_FROM`, `AI_BASE_URL`, `AI_MODEL`, `VAPID_SUBJECT`, and `SCHOOLOGY_CALLBACK_URL` are configuration values rather than secrets.
+Public/client values are `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`. `VAPID_PUBLIC_KEY` is read only by the server worker but is not secret. `EMAIL_FROM`, `AI_BASE_URL`, `AI_MODEL`, `VAPID_SUBJECT`, and `SCHOOLOGY_CALLBACK_URL` are configuration values rather than secrets.
 
 ## Local development
 

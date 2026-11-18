@@ -1,6 +1,6 @@
 # Costs and free-tier operation
 
-Target recurring infrastructure spend: **$0/month**, using free plans and local/open-source software. Free tier terms and limits can change; confirm current terms before deployment.
+Target recurring infrastructure spend: **$0/month**, using free plans and local/open-source software. Free tier terms and limits can change; confirm current terms before deployment. **Figures last verified 2026-11-17** (provider pricing pages can change after that date).
 
 | Service                            | Free path                                                    | Possible charges / limit behavior                                                                                       | Disable or avoid charges                                                                                        |
 | ---------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
