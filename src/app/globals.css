@@ -184,6 +184,26 @@ a {
   height: 28px;
   border-radius: 8px;
 }
+
+/* Logo mark (theme-aware dark/light). The SVG carries its own background
+   and brand colors, so the brand-mark wrapper stays transparent. */
+.logo-mark {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.logo-light {
+  display: none;
+}
+.light .logo-dark {
+  display: none;
+}
+.light .logo-light {
+  display: inline-block;
+}
+.sidebar-brand .brand-mark {
+  background: transparent;
+}
 .icon-button {
   border: 0;
   background: transparent;

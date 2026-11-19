@@ -498,7 +498,8 @@ export default function Workspace() {
       <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
         <div className="sidebar-brand">
           <div className="brand-mark small">
-            <CalendarDays size={17} />
+            <img src="/daymark-icon.svg" alt="" className="logo-mark logo-dark" />
+            <img src="/daymark-icon-light.svg" alt="" className="logo-mark logo-light" />
           </div>
           <b>daymark</b>
           <button
