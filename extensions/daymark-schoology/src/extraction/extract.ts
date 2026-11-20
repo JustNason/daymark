@@ -7,6 +7,8 @@ import type {
 const SCHOOL_PATH =
   /\/(?:home(?:\/|$)|courses?(?:\/|$)|course\/\d+|assignment\/\d+)/i;
 const ID_PATH = /\/(?:course|assignment|assessment)\/(\d+)/i;
+// LAUSD hosts Schoology at a district-branded domain instead of schoology.com.
+const KNOWN_INSTITUTION_HOSTS = new Set(["lms.lausd.net"]);
 
 export function isSchoologyPage(url: string, customHost?: string): boolean {
   try {
@@ -18,7 +20,9 @@ export function isSchoologyPage(url: string, customHost?: string): boolean {
       .replace(/^https?:\/\//, "")
       .split("/")[0];
     const knownSchoologyHost =
-      host === "schoology.com" || host.endsWith(".schoology.com");
+      host === "schoology.com" ||
+      host.endsWith(".schoology.com") ||
+      KNOWN_INSTITUTION_HOSTS.has(host);
     const explicitlyAllowedHost = Boolean(
       allowedCustomHost &&
         (host === allowedCustomHost || host.endsWith(`.${allowedCustomHost}`)),

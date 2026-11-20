@@ -97,6 +97,10 @@ test("recognizes supported Schoology routes and rejects unrelated pages", () => 
     isSchoologyPage("https://app.schoology.com/course/123/materials"),
     true,
   );
+  assert.equal(
+    isSchoologyPage("https://lms.lausd.net/course/123/materials"),
+    true,
+  );
   assert.equal(isSchoologyPage("https://app.schoology.com/login"), false);
   assert.equal(isSchoologyPage("https://example.org/course/123"), false);
   assert.equal(
