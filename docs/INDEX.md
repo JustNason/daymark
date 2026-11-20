@@ -4,7 +4,7 @@ Start here. **One source of truth per subject** — the table below says which
 document owns what. If two documents appear to disagree, the owning document
 wins and the other is stale: report it.
 
-**Last full live audit:** 2026-11-17. **Continuation source audit and local verification:** 2026-11-19. Integration status and test evidence are dated in their owning documents.
+**Last full live audit:** 2026-11-17. **Continuation source audit and local verification:** 2026-11-20. Integration status and test evidence are dated in their owning documents.
 
 **Brand package:** installed 2026-11-19 from the supplied concept archive;
 asset usage and identity rules are owned by

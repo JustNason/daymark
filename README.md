@@ -36,7 +36,7 @@ the source of truth.
 ## Local development
 
 1. Copy `.env.example` to `.env.local` and set the Supabase project URL and publishable/anon key.
-2. Apply all SQL migrations in `supabase/migrations/` in numeric order in the Supabase SQL editor. Schoology extension pairing specifically requires `0004_schoology_extension_pairing.sql`. See [docs/development/DEVELOPMENT.md](docs/development/DEVELOPMENT.md); the repo has no `supabase/config.toml`, so `supabase db push` requires `supabase init`/`link` first.
+2. Apply all SQL migrations in `supabase/migrations/` in numeric order in the Supabase SQL editor. Schoology extension sign-in pairing requires `0005_schoology_extension_device_flow.sql` as well as the earlier schema migrations. See [docs/development/DEVELOPMENT.md](docs/development/DEVELOPMENT.md); the repo has no `supabase/config.toml`, so `supabase db push` requires `supabase init`/`link` first.
 3. In Supabase Auth, configure the local site URL `http://localhost:3000` and redirect `http://localhost:3000/auth/callback`.
 4. Run `npm install`, then `npm run dev`.
 5. Open `http://localhost:3000` and register. Email confirmation behavior is controlled by Supabase Auth settings.

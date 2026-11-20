@@ -63,6 +63,7 @@ export async function DELETE() {
   const [
     { error: tokenError },
     { error: codeError },
+    { error: flowError },
     { error: integrationError },
   ] = await Promise.all([
     db
@@ -76,6 +77,11 @@ export async function DELETE() {
       .eq("user_id", auth.user.id)
       .is("consumed_at", null),
     db
+      .from("schoology_extension_flows")
+      .update({ status: "denied" })
+      .eq("user_id", auth.user.id)
+      .eq("status", "approved"),
+    db
       .from("external_integrations")
       .update({
         status: "disconnected",
@@ -85,7 +91,14 @@ export async function DELETE() {
       .eq("user_id", auth.user.id)
       .eq("provider", "schoology"),
   ]);
-  if (tokenError || codeError || integrationError)
+  const flowSchemaMissing =
+    flowError?.code === "42P01" || flowError?.code === "PGRST205";
+  if (
+    tokenError ||
+    codeError ||
+    (flowError && !flowSchemaMissing) ||
+    integrationError
+  )
     return NextResponse.json(
       { error: "Could not disconnect Schoology" },
       { status: 500 },

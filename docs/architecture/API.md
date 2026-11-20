@@ -10,12 +10,12 @@ additionally probed against the production deployment (see notes).
 
 ## Conventions
 
-- **Auth:** every route except the cron worker requires an active Supabase
-  session via `supabase.auth.getUser()` (cookie), and returns
+- **Auth:** most routes require an active Supabase session via
+  `supabase.auth.getUser()` (cookie), and return
   `401 {"error":"Unauthorized"}` (or `503` when Supabase env vars are
-  missing). All user data access through these routes still runs under RLS
-  (the server client uses the publishable key) — except routes using the
-  service role, marked below.
+  missing). Exceptions include the cron worker, extension polling, and
+  one-time token exchange; these use scoped high-entropy tokens. User ownership
+  is always derived server-side.
 - **Validation:** request bodies are Zod-validated only where marked; other
   routes accept no body or do loose type checks.
 - **Errors:** JSON `{"error": "…"}`. Some routes echo raw upstream/database
@@ -23,17 +23,18 @@ additionally probed against the production deployment (see notes).
 - **Rate limiting:** AI context and Schoology extension pairing/sync have
   bounded per-instance or database-backed limits; other routes have no
   generalized rate limiter.
-- **CSRF:** none; mitigated by same-origin `fetch` + SameSite cookies.
+- **CSRF:** no global middleware. Cookie-authenticated write routes use same-origin fetch/SameSite cookies; the extension approval endpoint also validates the request Origin.
 
 ## Pages (non-API routes)
 
-| Route                                 | File                             | Behavior                                                                                                        |
-| ------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `/`                                   | `src/app/page.tsx`               | server redirect → `/app`                                                                                        |
-| `/login`                              | `src/app/login/page.tsx`         | email/password sign-in & sign-up, Google + Discord OAuth buttons, forgot-password                               |
-| `/app`                                | `src/app/app/page.tsx`           | the entire workspace (client-side auth gate; no server middleware)                                              |
-| `/auth/reset` · `/auth/reset/confirm` | `src/app/auth/reset*/page.tsx`   | password reset request / new-password form                                                                      |
-| `/auth/callback`                      | `src/app/auth/callback/route.ts` | PKCE code exchange; `next` allowlisted to `/auth/reset/confirm` only; exchange errors silently ignored → `/app` |
+| Route                                 | File                             | Behavior                                                                                                                          |
+| ------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                                   | `src/app/page.tsx`               | server redirect → `/app`                                                                                                          |
+| `/login`                              | `src/app/login/page.tsx`         | email/password sign-in & sign-up, Google + Discord OAuth buttons, forgot-password                                                 |
+| `/app`                                | `src/app/app/page.tsx`           | the entire workspace (client-side auth gate; no server middleware)                                                                |
+| `/auth/reset` · `/auth/reset/confirm` | `src/app/auth/reset*/page.tsx`   | password reset request / new-password form                                                                                        |
+| `/auth/callback`                      | `src/app/auth/callback/route.ts` | PKCE code exchange; `next` allowlisted to reset or a validated extension approval flow; exchange errors silently ignored → `/app` |
+| `/extension/schoology`                | `src/app/extension/schoology/`   | signed-in user approval screen for a short-lived extension device flow                                                            |
 
 ## Route handlers
 
@@ -82,15 +83,18 @@ additionally probed against the production deployment (see notes).
 
 ### Schoology extension
 
-| Endpoint                                     | Behavior                                                                                                                                        |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/schoology/extension/pairing-code` | Session-authenticated; issues a ten-minute single-use code, stores only its hash, and limits issue frequency.                                   |
-| `POST /api/schoology/extension/pair`         | Exchanges a valid code for a random revocable token; 4 KiB streamed body cap, stores only the token hash, returns `Cache-Control: no-store`.    |
-| `GET /api/schoology/extension/status`        | Bearer-token-authenticated connection status.                                                                                                   |
-| `DELETE /api/schoology/extension`            | Session-authenticated revocation for the user’s extension token(s).                                                                             |
-| `DELETE /api/schoology/extension/disconnect` | Bearer-token-authenticated revocation for the presented extension token.                                                                        |
-| `POST /api/schoology/extension/sync`         | Bearer token; 10 MiB streamed body cap and bounded Zod schema; derives owner from token; upserts stable course/assignment IDs and logs results. |
-| Legacy OAuth routes                          | Connect and sync return 410; callback redirects to an extension-required state.                                                                 |
+| Endpoint                                       | Behavior                                                                                                                                        |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/schoology/extension/flow/start`     | Extension creates a short-lived device flow; stores only flow, poll, and API token hashes. Rate-limited by client address.                      |
+| `GET /api/schoology/extension/flow/poll`       | Requires the flow's polling bearer token; returns pending/approved state without exposing account identifiers.                                  |
+| `POST /api/schoology/extension/flow/authorize` | Session-authenticated and same-origin; assigns the flow to the current user and creates a hashed revocable extension token.                     |
+| `POST /api/schoology/extension/pairing-code`   | Session-authenticated; issues a ten-minute single-use code, stores only its hash, and limits issue frequency.                                   |
+| `POST /api/schoology/extension/pair`           | Exchanges a valid code for a random revocable token; 4 KiB streamed body cap, stores only the token hash, returns `Cache-Control: no-store`.    |
+| `GET /api/schoology/extension/status`          | Bearer-token-authenticated connection status.                                                                                                   |
+| `DELETE /api/schoology/extension`              | Session-authenticated revocation for the user’s extension token(s).                                                                             |
+| `DELETE /api/schoology/extension/disconnect`   | Bearer-token-authenticated revocation for the presented extension token.                                                                        |
+| `POST /api/schoology/extension/sync`           | Bearer token; 10 MiB streamed body cap and bounded Zod schema; derives owner from token; upserts stable course/assignment IDs and logs results. |
+| Legacy OAuth routes                            | Connect and sync return 410; callback redirects to an extension-required state.                                                                 |
 
 ### Notification preferences & push
 

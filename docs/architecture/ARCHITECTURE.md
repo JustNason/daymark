@@ -118,8 +118,9 @@ integration: [INTEGRATIONS.md](../operations/INTEGRATIONS.md).
 - **Discord:** OAuth2 `identify` linking (state cookie bound to user id) +
   bot DM delivery from the cron worker. Requires `DISCORD_BOT_TOKEN`.
 - **Schoology:** Manifest V3 browser extension reads rendered coursework
-  from the user's signed-in tab, then syncs through short-lived pairing and
-  revocable hashed tokens. Legacy OAuth connect/sync paths are retired; see
+  from the user's signed-in tab. Sign-in and explicit approval use a short-lived
+  device flow; the extension polls and installs a locally generated revocable
+  token after approval. Legacy OAuth connect/sync paths are retired; see
   [INTEGRATIONS.md](../operations/INTEGRATIONS.md).
 - **AI:** one advisory endpoint (`/api/ai/plan`).
 - **Push/email:** delivery channels owned by the cron worker.

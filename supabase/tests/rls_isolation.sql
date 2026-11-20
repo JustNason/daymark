@@ -29,6 +29,7 @@ begin
   foreach table_name in array array[
     'schoology_extension_pairing_codes',
     'schoology_extension_tokens',
+    'schoology_extension_flows',
     'extension_pair_rate_limits'
   ] loop
     if not coalesce((select relrowsecurity from pg_class where oid = format('public.%I', table_name)::regclass), false) then
@@ -47,6 +48,7 @@ begin
   foreach table_name in array array[
     'schoology_extension_pairing_codes',
     'schoology_extension_tokens',
+    'schoology_extension_flows',
     'extension_pair_rate_limits'
   ] loop
     foreach privilege_name in array array['SELECT', 'INSERT', 'UPDATE', 'DELETE'] loop
@@ -62,7 +64,8 @@ begin
 
   foreach fn_oid in array array[
     'public.consume_schoology_pairing_code(text,text,timestamptz)'::regprocedure::oid,
-    'public.allow_schoology_pair_attempt(text)'::regprocedure::oid
+    'public.allow_schoology_pair_attempt(text)'::regprocedure::oid,
+    'public.authorize_schoology_extension_flow(text,uuid,timestamptz)'::regprocedure::oid
   ] loop
     if has_function_privilege('anon', fn_oid, 'EXECUTE') or
        has_function_privilege('authenticated', fn_oid, 'EXECUTE') then
@@ -110,6 +113,42 @@ values
   ('00000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'rls-a@example.invalid', '', '{"full_name":"RLS User A"}', now(), now()),
   ('00000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'rls-b@example.invalid', '', '{"full_name":"RLS User B"}', now(), now())
 on conflict (id) do nothing;
+
+insert into public.schoology_extension_flows(
+  flow_hash, poll_token_hash, extension_token_hash, expires_at
+) values (
+  encode(digest('rls-extension-flow', 'sha256'), 'hex'),
+  encode(digest('rls-extension-poll-token', 'sha256'), 'hex'),
+  encode(digest('rls-extension-device-token', 'sha256'), 'hex'),
+  now() + interval '10 minutes'
+);
+
+set local role service_role;
+do $$
+declare allowed boolean;
+begin
+  select public.authorize_schoology_extension_flow(
+    encode(digest('rls-extension-flow', 'sha256'), 'hex'),
+    '00000000-0000-0000-0000-000000000001',
+    now() + interval '1 year'
+  ) into allowed;
+  if allowed is not true then raise exception 'Extension flow did not authorize its Daymark user'; end if;
+
+  select public.authorize_schoology_extension_flow(
+    encode(digest('rls-extension-flow', 'sha256'), 'hex'),
+    '00000000-0000-0000-0000-000000000001',
+    now() + interval '1 year'
+  ) into allowed;
+  if allowed is not true then raise exception 'Same-user extension approval retry was not idempotent'; end if;
+
+  select public.authorize_schoology_extension_flow(
+    encode(digest('rls-extension-flow', 'sha256'), 'hex'),
+    '00000000-0000-0000-0000-000000000002',
+    now() + interval '1 year'
+  ) into allowed;
+  if allowed is not false then raise exception 'A different Daymark user claimed an approved flow'; end if;
+end $$;
+reset role;
 
 insert into public.schoology_extension_pairing_codes(user_id, code_hash, expires_at)
 values (

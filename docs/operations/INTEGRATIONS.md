@@ -47,8 +47,10 @@ The API/OAuth connect path is retired. Build and installation instructions are i
 
 - The Manifest V3 extension separates rendered-DOM extraction, normalization, pairing/sync requests, local settings, and popup UI. `activeTab` and `scripting` inspect the active page only after the user requests a scan.
 - It reads visible course and assignment IDs, titles, descriptions, URLs, due dates, points, and explicit submission states. It does not read cookies, use Schoology API credentials, or send data before the user presses Sync. Pagination is user-driven: scan each Schoology page that is visibly open.
-- Pairing codes expire after ten minutes and are single-use. The server stores hashes of pairing codes and revocable one-year extension tokens; sync ownership is derived from the token, never a client-supplied user ID.
+- The extension starts a ten-minute device flow, opens Daymark in a browser tab, and polls until the signed-in user approves. The extension stores the polling secret and API token locally; Daymark stores only hashes. An authenticated, same-origin endpoint assigns ownership and creates the revocable one-year token. The extension never supplies a user ID.
+- User/password and Google/Discord Daymark sign-in return through an allowlisted internal path to the authorization screen. Users explicitly approve the extension before it is linked.
 - Pair and sync requests are streamed with hard 4 KiB and 10 MiB body caps, including when `Content-Length` is missing or inaccurate. Sync validates the bounded payload, uses stable external IDs and upserts, retains personal assignment overrides, creates deterministic auto-import task IDs, conservatively retains missing assignments, and records sync results.
+- Additive database migration `0005_schoology_extension_device_flow.sql` is required for automatic pairing. Apply all migrations in order before deploying this flow. It has not been applied to production from this workspace.
 - Extension TypeScript build and fixture tests pass. Real authenticated Schoology compatibility is **Not verified** because no institution account was available.
 - Legacy connect returns 410, callback redirects to an extension-required state, and API sync returns 410. Existing database records are retained.
 

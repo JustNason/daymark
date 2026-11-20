@@ -5,9 +5,13 @@ import {
 import { getSettings, saveSettings } from "../storage/settings.js";
 import {
   STORAGE_KEYS,
+  type PendingExtensionFlow,
   type SchoologySnapshot,
   type SyncResult,
 } from "../shared/types.js";
+
+const DEFAULT_DAYMARK_ORIGIN = "https://daymark-virid-two.vercel.app";
+const FLOW_ALARM = "daymark-schoology-pairing";
 
 const $ = <T extends HTMLElement>(selector: string) =>
   document.querySelector<T>(selector)!;
@@ -22,11 +26,6 @@ const disconnectButton = $("#disconnect") as HTMLButtonElement;
 const pairingFields = $("#pairing-fields");
 const originInput = $("#daymark-origin") as HTMLInputElement;
 const schoologyHostInput = $("#schoology-host") as HTMLInputElement;
-const codeInput = $("#pairing-code") as HTMLInputElement;
-const openDaymarkButton = $("#open-daymark") as HTMLButtonElement;
-const openDaymarkConnectButton = $(
-  "#open-daymark-connect",
-) as HTMLButtonElement;
 let currentSnapshot: SchoologySnapshot | undefined;
 let isConnected = false;
 
@@ -36,6 +35,15 @@ function setStatus(
 ) {
   status.textContent = message;
   status.className = `status status--${kind}`;
+}
+
+function setConnectionStatus(
+  message: string,
+  kind: "quiet" | "success" | "error" = "quiet",
+) {
+  const connectionStatus = $("#connection-status");
+  connectionStatus.textContent = message;
+  connectionStatus.className = `connect-status${kind === "quiet" ? "" : ` connect-status--${kind}`}`;
 }
 
 function escapeText(value: string): string {
@@ -176,52 +184,176 @@ async function ensurePermission(origin: string): Promise<void> {
     );
 }
 
-connectButton.addEventListener("click", async () => {
+function randomSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  let binary = "";
+  bytes.forEach((byte) => (binary += String.fromCharCode(byte)));
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+async function startPairingFlow() {
   connectButton.disabled = true;
+  connectButton.textContent = "Starting…";
+  setConnectionStatus("Preparing a secure Daymark connection…");
   try {
-    const origin = validatedOrigin(originInput.value.trim());
-    const code = codeInput.value.trim();
-    if (!code)
-      throw new Error(
-        "Create a one-time pairing code in Daymark, then paste it here.",
-      );
+    const settings = await getSettings();
+    const origin = validatedOrigin(
+      originInput.value.trim() ||
+        settings.daymarkOrigin ||
+        DEFAULT_DAYMARK_ORIGIN,
+    );
     const schoologyHost = validatedSchoologyHost(schoologyHostInput.value);
     await ensurePermission(origin);
-    const response = await fetch(`${origin}/api/schoology/extension/pair`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pairingCode: code }),
-    });
-    const body: unknown = await response.json();
-    if (
-      !response.ok ||
-      !body ||
-      typeof body !== "object" ||
-      !("token" in body) ||
-      typeof body.token !== "string"
-    ) {
+    const flowId = randomSecret();
+    const pollToken = randomSecret();
+    const extensionToken = randomSecret();
+    const response = await fetch(
+      `${origin}/api/schoology/extension/flow/start`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          flowId,
+          pollToken,
+          extensionTokenHash: await sha256Hex(extensionToken),
+        }),
+      },
+    );
+    const body: unknown = await response.json().catch(() => null);
+    if (!response.ok) {
+      const serverMessage =
+        body &&
+        typeof body === "object" &&
+        "error" in body &&
+        typeof body.error === "string"
+          ? body.error.slice(0, 240)
+          : null;
       throw new Error(
-        "Pairing failed. The code may have expired or already been used. Generate a new code in Daymark Settings.",
+        serverMessage ||
+          `Daymark could not start connection (HTTP ${response.status}).`,
       );
     }
+    if (
+      !body ||
+      typeof body !== "object" ||
+      !("expiresAt" in body) ||
+      typeof body.expiresAt !== "string"
+    )
+      throw new Error("Daymark returned an invalid connection response.");
+    const pendingFlow: PendingExtensionFlow = {
+      flowId,
+      pollToken,
+      extensionToken,
+      expiresAt: body.expiresAt,
+    };
     await saveSettings({
+      ...settings,
       daymarkOrigin: origin,
       schoologyHost,
-      token: body.token,
-      connectedAt: new Date().toISOString(),
+      pendingFlow,
+      pairingMessage:
+        "Sign in to Daymark and authorize the extension in the tab that just opened.",
     });
-    codeInput.value = "";
-    setStatus("Connected to Daymark.", "success");
+    await chrome.alarms.create(FLOW_ALARM, { delayInMinutes: 0.5 });
+    await chrome.tabs.create({
+      url: `${origin}/extension/schoology?flow=${encodeURIComponent(flowId)}`,
+    });
+    connectButton.textContent = "Waiting for approval…";
+    setConnectionStatus(
+      "Daymark opened in a new tab. Sign in and authorize; the extension will connect automatically.",
+    );
     await refreshSettings();
   } catch (error) {
-    setStatus(
-      error instanceof Error ? error.message : "Pairing failed.",
-      "error",
-    );
-  } finally {
+    const message =
+      error instanceof TypeError
+        ? "Could not reach Daymark. Check the address and allow the requested site access in Chrome."
+        : error instanceof Error
+          ? error.message
+          : "Pairing failed. Check the Daymark address and pairing code.";
+    setStatus(message, "error");
+    setConnectionStatus(message, "error");
     connectButton.disabled = false;
+    connectButton.textContent = "Connect to Daymark";
+    return;
+  } finally {
+    if (connectButton.textContent !== "Waiting for approval…") {
+      connectButton.disabled = false;
+      connectButton.textContent = "Connect to Daymark";
+    }
   }
-});
+}
+
+async function pollPendingFlow(flow: PendingExtensionFlow): Promise<void> {
+  const settings = await getSettings();
+  if (settings.pendingFlow?.flowId !== flow.flowId) return;
+  if (new Date(flow.expiresAt).valueOf() <= Date.now()) {
+    await chrome.alarms.clear(FLOW_ALARM);
+    await saveSettings({
+      ...settings,
+      pendingFlow: null,
+      pairingMessage: "The connection request expired. Start again to connect.",
+    });
+    await refreshSettings();
+    return;
+  }
+  try {
+    const response = await fetch(
+      `${settings.daymarkOrigin}/api/schoology/extension/flow/poll?flow=${encodeURIComponent(flow.flowId)}`,
+      {
+        headers: { authorization: `Bearer ${flow.pollToken}` },
+        cache: "no-store",
+      },
+    );
+    if (response.status === 410) {
+      await chrome.alarms.clear(FLOW_ALARM);
+      await saveSettings({
+        ...settings,
+        pendingFlow: null,
+        pairingMessage:
+          "The connection request expired. Start again to connect.",
+      });
+      await refreshSettings();
+      return;
+    }
+    if (!response.ok) return;
+    const result: unknown = await response.json();
+    if (
+      !result ||
+      typeof result !== "object" ||
+      !("status" in result) ||
+      result.status !== "approved"
+    )
+      return;
+    await chrome.alarms.clear(FLOW_ALARM);
+    await saveSettings({
+      ...settings,
+      token: flow.extensionToken,
+      connectedAt: new Date().toISOString(),
+      pendingFlow: null,
+      pairingMessage: "Connected to Daymark. You can scan and sync coursework.",
+    });
+    await refreshSettings();
+    setConnectionStatus("Connected to Daymark.", "success");
+    setStatus("Connected to Daymark.", "success");
+  } catch {
+    // A transient network issue leaves the short-lived flow available for another poll.
+  }
+}
+
+connectButton.addEventListener("click", () => void startPairingFlow());
 
 syncButton.addEventListener("click", async () => {
   syncButton.disabled = true;
@@ -306,9 +438,10 @@ function renderLastSync(value?: string | null) {
 
 async function refreshSettings() {
   const settings = await getSettings();
-  originInput.value = settings.daymarkOrigin;
+  originInput.value = settings.daymarkOrigin || DEFAULT_DAYMARK_ORIGIN;
   schoologyHostInput.value = settings.schoologyHost ?? "";
   let connected = Boolean(settings.token);
+  const waitingForApproval = Boolean(settings.pendingFlow);
   let connectionStatusAvailable = true;
   if (connected && settings.daymarkOrigin) {
     try {
@@ -352,22 +485,36 @@ async function refreshSettings() {
     ? connectionStatusAvailable
       ? "Daymark connected"
       : "Daymark status unavailable"
-    : "Daymark not connected";
+    : waitingForApproval
+      ? "Waiting for Daymark approval"
+      : "Daymark not connected";
   document.querySelector("#connection-dot")!.className =
     `dot ${connected && connectionStatusAvailable ? "dot--on" : ""}`;
   document.querySelector("#connection-badge")!.textContent = connected
     ? "Connected"
-    : "Not connected";
+    : waitingForApproval
+      ? "Waiting"
+      : "Not connected";
   document.querySelector<HTMLElement>("#connection-intro")!.textContent =
     connected
       ? "Your Daymark workspace is linked. Scan Schoology and sync coursework when you are ready."
-      : "Continue in Daymark to sign in and create a one-time code. Your Daymark password stays on Daymark.";
-  document.querySelector<HTMLElement>("#connection-address")!.hidden =
-    connected;
+      : waitingForApproval
+        ? "Finish signing in and approve the request in the Daymark tab. This extension will connect automatically."
+        : "Sign in to Daymark in your browser and approve the request there. The extension connects automatically afterward.";
   document.querySelector<HTMLElement>("#advanced-settings")!.hidden = connected;
   disconnectButton.hidden = !connected;
   connectButton.hidden = connected;
   pairingFields.hidden = connected;
+  connectButton.disabled = waitingForApproval;
+  connectButton.textContent = waitingForApproval
+    ? "Waiting for approval…"
+    : "Connect to Daymark";
+  const connectionStatus =
+    document.querySelector<HTMLElement>("#connection-status");
+  if (!connected && settings.pairingMessage) {
+    connectionStatus!.textContent = settings.pairingMessage;
+    connectionStatus!.className = `connect-status${settings.pairingMessage.startsWith("Connected") ? " connect-status--success" : ""}`;
+  }
   syncButton.disabled = !connected || !currentSnapshot?.assignments.length;
 }
 
@@ -412,36 +559,12 @@ disconnectButton.addEventListener("click", async () => {
     disconnectButton.disabled = false;
   }
 });
-async function continueWithDaymark() {
-  try {
-    const origin = validatedOrigin(originInput.value.trim());
-    const settings = await getSettings();
-    const schoologyHost = validatedSchoologyHost(schoologyHostInput.value);
-    await saveSettings({
-      daymarkOrigin: origin,
-      schoologyHost,
-      ...(settings.daymarkOrigin === origin
-        ? { token: settings.token, connectedAt: settings.connectedAt }
-        : {}),
-    });
-    chrome.tabs.create({ url: `${origin}/app` });
-    setStatus(
-      "Daymark opened. Sign in and create a pairing code in Settings → Schoology.",
-    );
-  } catch (error) {
-    setStatus(
-      error instanceof Error ? error.message : "Enter a valid Daymark address.",
-      "error",
-    );
-    originInput.focus();
-  }
-}
-openDaymarkButton.addEventListener("click", () => void continueWithDaymark());
-openDaymarkConnectButton.addEventListener(
-  "click",
-  () => void continueWithDaymark(),
-);
 scanButton.addEventListener("click", scan);
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes[STORAGE_KEYS.settings])
+    void refreshSettings();
+});
 
 void (async () => {
   await refreshSettings();
@@ -463,4 +586,9 @@ void (async () => {
   else
     pageHint.textContent =
       "Open a signed-in Schoology page to scan coursework.";
+  const pendingFlow = settings.pendingFlow;
+  if (pendingFlow) {
+    void pollPendingFlow(pendingFlow);
+    window.setInterval(() => void pollPendingFlow(pendingFlow), 4000);
+  }
 })();

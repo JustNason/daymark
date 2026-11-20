@@ -8,10 +8,11 @@ migrations win and this file is stale — report it.
 **Migration inventory (2026-11-19):** `0001_daymark.sql` defines the initial
 schema, `0002_security_hardening.sql` adds the profiles RLS enablement and
 notification RPC grants, `0003_hot_path_indexes.sql` adds four additive
-indexes for push subscription, assignment, subtask, and comment lookups, and
-`0004_schoology_extension_pairing.sql` adds the extension pairing codes,
-hashed revocable tokens, rate limits, and server-only pairing RPCs. The third
-and fourth migrations have not been verified against production. The second
+indexes for push subscription, assignment, subtask, and comment lookups,
+`0004_schoology_extension_pairing.sql` adds hashed revocable tokens and
+legacy code pairing, and `0005_schoology_extension_device_flow.sql` adds the
+short-lived sign-in flow table and server-only authorization RPC. Migrations
+0003–0005 have not been verified against production. The second
 migration was applied to the disposable `DaymarkTest`
 project (`nctorjcauabycyzdmxxy`) and production Daymark
 (`iytnacmrgfaykxdiurzw`) on 2026-11-19. The rollback-only isolation test
@@ -55,7 +56,7 @@ erDiagram
     auth_users ||--o{ ai_scheduling_proposals : "user_id"
 ```
 
-## Tables (24)
+## Tables (25)
 
 All primary keys are UUID; every user-owned table has `user_id` →
 `auth.users(id) ON DELETE CASCADE` (account deletion cascades).
@@ -69,13 +70,13 @@ All primary keys are UUID; every user-owned table has `user_id` →
 | Integrations  | `external_integrations`, `integration_sync_logs`                                             | per `(user_id, provider)` connection state + encrypted token blob + sync history                                                 |
 | Notifications | `notification_preferences`, `notifications`, `notification_deliveries`, `push_subscriptions` | channel prefs, in-app history, per-channel delivery queue, web-push endpoints                                                    |
 | AI            | `ai_conversations`, `ai_messages`, `ai_scheduling_proposals`                                 | first two remain unused; proposals are written on approve/reject                                                                 |
+| Extension     | `schoology_extension_flows`                                                                  | short-lived device approval state; only service-role routes can access it                                                        |
 
-Migration `0004_schoology_extension_pairing.sql` adds pairing codes, hashed
-extension tokens, and a service-role-only rate-limit table/functions. The
-pre-existing encrypted integration credential field remains in the schema
-for compatibility; extension pairing does not require or rewrite historical
-rows. Column-level detail is intentionally not duplicated here — read the
-migrations.
+Migrations 0004–0005 add hashed extension credentials and a short-lived
+service-role-only device flow. The pre-existing encrypted integration
+credential field remains in the schema for compatibility; extension pairing
+does not require or rewrite historical rows. Column-level detail is
+intentionally not duplicated here — read the migrations.
 
 ## Relationships and integrity design
 
@@ -113,11 +114,10 @@ migrations.
 ## RLS and ownership
 
 - Base user tables use the owner policies described below; migration 0004
-  enables owner-only RLS on the two extension credential tables. The rate
-  limit table has RLS enabled with no client policies and is accessed only by
-  the service-role RPCs. The rollback-only test checks that browser roles have
-  no direct SELECT/INSERT/UPDATE/DELETE grants on those tables and that
-  `service_role` has each required data privilege.
+  enables owner-only RLS on the two legacy extension credential tables.
+  Pairing flows and rate-limit data have RLS enabled with no client policies
+  and are accessed only by service-role routes/RPCs. The rollback-only test
+  checks browser-role privileges and the authorization RPC.
   (`USING`/`WITH CHECK user_id = (select auth.uid())`), plus policy `profile_owner`
   on `profiles` (migration:202).
 - `0001_daymark.sql` omits `profiles` from its RLS loop. In DaymarkTest,

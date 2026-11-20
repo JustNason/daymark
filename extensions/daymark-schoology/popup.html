@@ -19,9 +19,6 @@
       <section class="connection-row" aria-label="Connection status">
         <span id="connection-dot" class="dot" aria-hidden="true"></span>
         <span id="connection-label">Checking connection…</span>
-        <button id="open-daymark" class="text-button" type="button">
-          Continue with Daymark
-        </button>
       </section>
 
       <section class="connect-card" aria-labelledby="connect-title">
@@ -35,47 +32,37 @@
           >
         </div>
         <p id="connection-intro" class="connect-copy">
-          Continue in Daymark to sign in and create a one-time code. Your
-          Daymark password stays on Daymark.
+          Sign in to Daymark in your browser and approve the request there. The
+          extension connects automatically afterward.
         </p>
-        <div id="connection-address">
-          <label for="daymark-origin">Daymark address</label>
-          <div class="address-row">
-            <input
-              id="daymark-origin"
-              type="url"
-              inputmode="url"
-              placeholder="https://your-daymark.example"
-              autocomplete="url"
-            />
-            <button
-              id="open-daymark-connect"
-              class="button button--secondary"
-              type="button"
-            >
-              Continue
-            </button>
-          </div>
-        </div>
         <div id="pairing-fields">
-          <label for="pairing-code">One-time pairing code</label>
-          <input
-            id="pairing-code"
-            type="text"
-            inputmode="text"
-            autocomplete="one-time-code"
-            placeholder="Paste code from Daymark"
-          />
           <button
             id="connect"
             class="button button--primary connect-action"
             type="button"
           >
-            Connect extension
+            Connect to Daymark
           </button>
+          <p
+            id="connection-status"
+            class="connect-status"
+            role="status"
+            aria-live="polite"
+          >
+            Daymark sign-in stays in the browser; the extension never asks for
+            your password.
+          </p>
         </div>
         <details id="advanced-settings" class="advanced-settings">
-          <summary>Advanced · custom Schoology domain</summary>
+          <summary>Advanced connection settings</summary>
+          <label for="daymark-origin">Daymark server</label>
+          <input
+            id="daymark-origin"
+            type="url"
+            inputmode="url"
+            placeholder="https://your-daymark.example"
+            autocomplete="url"
+          />
           <label for="schoology-host">Schoology host</label>
           <input
             id="schoology-host"

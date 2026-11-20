@@ -9,9 +9,31 @@ interface ChromeTab {
   url?: string;
   title?: string;
 }
+interface ChromeStorageChange {
+  oldValue?: unknown;
+  newValue?: unknown;
+}
 declare const chrome: {
-  runtime: { onInstalled: { addListener(callback: () => void): void } };
-  storage: { local: ChromeStorageArea };
+  runtime: {
+    onInstalled: { addListener(callback: () => void): void };
+    onStartup: { addListener(callback: () => void): void };
+  };
+  storage: {
+    local: ChromeStorageArea;
+    onChanged: {
+      addListener(
+        callback: (
+          changes: Record<string, ChromeStorageChange>,
+          areaName: string,
+        ) => void,
+      ): void;
+    };
+  };
+  alarms: {
+    create(name: string, alarmInfo: { delayInMinutes: number }): Promise<void>;
+    clear(name: string): Promise<boolean>;
+    onAlarm: { addListener(callback: (alarm: { name: string }) => void): void };
+  };
   tabs: {
     query(query: {
       active: boolean;

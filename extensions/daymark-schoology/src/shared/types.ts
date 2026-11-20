@@ -34,6 +34,15 @@ export interface ExtensionSettings {
   schoologyHost?: string;
   token?: string;
   connectedAt?: string;
+  pairingMessage?: string;
+  pendingFlow?: PendingExtensionFlow | null;
+}
+
+export interface PendingExtensionFlow {
+  flowId: string;
+  pollToken: string;
+  extensionToken: string;
+  expiresAt: string;
 }
 
 export interface SyncResult {

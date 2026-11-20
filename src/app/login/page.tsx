@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { safeAuthReturnPath } from "@/lib/auth/return-path";
 import { ArrowRight, LoaderCircle } from "lucide-react";
 
 function DiscordIcon({
@@ -49,6 +50,12 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const router = useRouter();
   const supabase = createClient();
+  function safeNextPath(): string {
+    return safeAuthReturnPath(
+      new URLSearchParams(window.location.search).get("next"),
+      window.location.origin,
+    );
+  }
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -66,7 +73,7 @@ export default function LoginPage() {
       password,
     });
     if (error) setError(error.message);
-    else router.push("/app");
+    else router.push(safeNextPath());
     setBusy(false);
   }
   async function signUp() {
@@ -82,7 +89,9 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${location.origin}/auth/callback` },
+      options: {
+        emailRedirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(safeNextPath())}`,
+      },
     });
     setBusy(false);
     if (error) setError(error.message);
@@ -96,7 +105,9 @@ export default function LoginPage() {
     setBusy(true);
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      options: { redirectTo: `${location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(safeNextPath())}`,
+      },
     });
     if (error) {
       setError(error.message);

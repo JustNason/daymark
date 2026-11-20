@@ -446,6 +446,36 @@ a {
   border: 1px solid var(--line);
   border-radius: 10px;
 }
+.extension-authorize-card {
+  width: min(100%, 560px);
+}
+.extension-authorize-card .logo-mark {
+  width: 150px;
+  height: auto;
+  margin-bottom: 25px;
+}
+.extension-authorize-card .eyebrow {
+  margin: 0 0 8px;
+}
+.extension-authorize-card h1 {
+  margin: 8px 0 12px;
+}
+.extension-authorize-card p {
+  color: var(--muted);
+  line-height: 1.65;
+}
+.extension-authorize-card .button {
+  margin-top: 8px;
+}
+.extension-authorize-card .extension-authorize-note {
+  margin: 16px 0 0;
+  font-size: var(--type-meta);
+}
+.extension-authorize-card .notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .error-screen {
   min-height: 100vh;
   display: grid;

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties } from "react";
-import { format } from "date-fns";
 import {
   Bell,
   Check,
@@ -356,10 +355,6 @@ export function SettingsView({
   const [saved, setSaved] = useState(false);
   const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
   const [activeSettingsSection, setActiveSettingsSection] = useState("General");
-  const [schoologyPairing, setSchoologyPairing] = useState<{
-    pairingCode: string;
-    expiresAt: string;
-  } | null>(null);
   const [schoologyMessage, setSchoologyMessage] = useState("");
   const [schoologyBusy, setSchoologyBusy] = useState(false);
   const settingsSections = [
@@ -398,44 +393,6 @@ export function SettingsView({
       );
     }
   }
-  async function createSchoologyPairingCode() {
-    setSchoologyBusy(true);
-    setSchoologyMessage("");
-    try {
-      const response = await fetch("/api/schoology/extension/pairing-code", {
-        method: "POST",
-      });
-      const result = (await response.json()) as {
-        pairingCode?: string;
-        expiresAt?: string;
-        error?: string;
-      };
-      if (!response.ok || !result.pairingCode || !result.expiresAt)
-        throw new Error(result.error || "Could not create a pairing code");
-      setSchoologyPairing({
-        pairingCode: result.pairingCode,
-        expiresAt: result.expiresAt,
-      });
-      try {
-        await navigator.clipboard.writeText(result.pairingCode);
-        setSchoologyMessage(
-          "One-time code copied. Paste it into the Daymark extension; it expires in 10 minutes.",
-        );
-      } catch {
-        setSchoologyMessage(
-          "Enter the one-time code in the Daymark extension. It expires in 10 minutes.",
-        );
-      }
-    } catch (failure) {
-      setSchoologyMessage(
-        failure instanceof Error
-          ? failure.message
-          : "Could not create a pairing code",
-      );
-    } finally {
-      setSchoologyBusy(false);
-    }
-  }
   async function disconnectSchoologyExtension() {
     setSchoologyBusy(true);
     try {
@@ -444,7 +401,6 @@ export function SettingsView({
       });
       if (!response.ok)
         throw new Error("Could not disconnect the Daymark extension");
-      setSchoologyPairing(null);
       setSchoologyMessage(
         "Extension disconnected. Existing imported coursework remains in Daymark.",
       );
@@ -723,62 +679,16 @@ export function SettingsView({
                   Disconnect extension
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className="button primary small-button"
-                  disabled={schoologyBusy}
-                  onClick={() => void createSchoologyPairingCode()}
-                >
-                  {schoologyBusy ? "Working…" : "Connect extension"}
-                </button>
+                <span className="muted">Connect from the extension</span>
               )}
             </div>
             <div className="schoology-extension-setup">
-              <h3>Finish connecting your extension</h3>
-              <ol>
-                <li>
-                  Open the extension and choose Continue with Daymark. Sign in
-                  here if asked.
-                </li>
-                <li>
-                  Create a one-time code below, then paste it into the
-                  extension.
-                </li>
-                <li>Return to Schoology and scan your coursework.</li>
-              </ol>
-              {schoologyPairing && (
-                <div className="pairing-code">
-                  <span>One-time code · expires in 10 minutes</span>
-                  <code>{schoologyPairing.pairingCode}</code>
-                  <small>
-                    Expires{" "}
-                    {format(
-                      new Date(schoologyPairing.expiresAt),
-                      "MMM d, h:mm a",
-                    )}
-                  </small>
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(
-                          schoologyPairing.pairingCode,
-                        );
-                        setSchoologyMessage(
-                          "Pairing code copied. It expires shortly.",
-                        );
-                      } catch {
-                        setSchoologyMessage(
-                          "Select and copy the pairing code above.",
-                        );
-                      }
-                    }}
-                  >
-                    Copy code
-                  </button>
-                </div>
-              )}
+              <h3>Connect your extension</h3>
+              <p>
+                Open Daymark for Schoology from your browser toolbar and choose
+                <b> Connect to Daymark</b>. Sign in and authorize the request in
+                the browser tab that opens. The extension will pair itself.
+              </p>
               {schoologyMessage && (
                 <p className="preference-message" role="status">
                   {schoologyMessage}

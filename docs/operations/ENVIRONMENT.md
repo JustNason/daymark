@@ -40,8 +40,9 @@ account deletion and cron**.
 ## Integration: Schoology extension
 
 The extension uses no Schoology API credentials and introduces no environment
-variables. Pairing tokens and coursework ownership are managed by the
-authenticated Daymark server. The retired OAuth routes return 410; old
+variables. Its hosted server address is prefilled and can be changed for local
+development or self-hosting. Device-flow secrets and coursework ownership are
+managed by the Daymark server. The retired Schoology OAuth routes return 410; old
 `SCHOOLOGY_*` and `INTEGRATION_ENCRYPTION_KEY` deployment variables are no
 longer read by the application and may be removed by an operator after
 confirming no other deployment consumer depends on them. Existing stored

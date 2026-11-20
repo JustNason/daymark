@@ -20,8 +20,8 @@ Local development workflow for Daymark. For a quick start see
    Full variable reference: [ENVIRONMENT.md](../operations/ENVIRONMENT.md).
 3. Apply every SQL migration in [`supabase/migrations/`](../../supabase/migrations/)
    in numeric order in the Supabase SQL editor. Schoology extension pairing
-   requires `0004_schoology_extension_pairing.sql`; without it, code creation
-   and token exchange cannot work. There is no `supabase/config.toml` in this
+   uses `0004_schoology_extension_pairing.sql`; automatic sign-in pairing also
+   requires `0005_schoology_extension_device_flow.sql`. There is no `supabase/config.toml` in this
    repo, so `supabase db push` requires `supabase init`/`link` first — the SQL
    editor path is the supported one today.
 4. In Supabase Auth, allow `http://localhost:3000` and the

@@ -36,6 +36,17 @@ export async function DELETE(request: Request) {
       { status: 401 },
     );
 
+  const { error: flowError } = await db
+    .from("schoology_extension_flows")
+    .update({ status: "denied" })
+    .eq("extension_token_hash", hashExtensionSecret(token))
+    .eq("status", "approved");
+  if (flowError && flowError.code !== "42P01" && flowError.code !== "PGRST205")
+    console.error("Could not close the revoked Schoology extension flow", {
+      code: flowError.code,
+      message: flowError.message,
+    });
+
   const { count, error: countError } = await db
     .from("schoology_extension_tokens")
     .select("id", { count: "exact", head: true })
