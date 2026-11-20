@@ -31,7 +31,7 @@ modified.*
 
 | Item | Finding | Why first |
 | --- | --- | --- |
-| S1 | Ensure `profiles` RLS and owner filtering (migration/test passed on DaymarkTest; production migration and metadata verified) | Application code change is in the working tree and awaits normal release deployment |
+| S1 | Ensure `profiles` RLS and owner filtering (migration/test passed on DaymarkTest; production migration and metadata verified; app filter deployed in `fc96685`) | Complete for the database security scope |
 | S2 | Revoke `EXECUTE` on `claim_notification_deliveries` (migration and ACL assertions verified on DaymarkTest and production) | Worker delivery after restriction was not live-tested |
 | S3/S4 | Constant-time cron secret compare; add CSP | Match SECURITY.md claims |
 | UI-07 | Keep modals open on save failure | Silent data loss on the core workflow |

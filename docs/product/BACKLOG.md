@@ -25,7 +25,7 @@ Full detail: [../architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md)
 
 | ID | Item | Sev | Notes |
 | --- | --- | --- | --- |
-| S1 | Ensure RLS is enabled on `profiles` and add an explicit owner filter to the Settings profile read | **High** | **Done** — migration and two-user profile assertions passed on DaymarkTest; production migration and RLS metadata verified; Settings query is explicitly user-filtered in source. Updated application code has not been deployed. |
+| S1 | Ensure RLS is enabled on `profiles` and add an explicit owner filter to the Settings profile read | **High** | **Done** — migration and two-user profile assertions passed on DaymarkTest; production migration and RLS metadata verified; explicitly user-filtered Settings query deployed in commit `fc96685`. |
 | S2 | Restrict `EXECUTE` on `claim_notification_deliveries(integer)` to `service_role` | **High** | **Done** — test and production metadata confirm PUBLIC/anon/authenticated denied and service_role allowed. Worker source uses the service-role client; live delivery after restriction was not exercised. A stuck-row reaper remains separate future work |
 | S3 | Constant-time cron secret comparison (`timingSafeEqual` on hashes) | Med | `api/cron/notifications/route.ts:60` |
 | S4 | Add Content-Security-Policy to `next.config.ts` | Med | None exists today |

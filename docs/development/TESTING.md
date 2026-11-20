@@ -22,6 +22,7 @@ npm run test:e2e    # Playwright (chromium + Pixel 7 against a dev server)
 | Integration | **None** | No test exercises persistence, auth, or API routes |
 | End-to-end | 1 smoke test: `tests/e2e/setup.spec.ts` asserts the `/login` page renders controls | No login or authenticated flow is performed |
 | Database / RLS | `supabase/tests/rls_isolation.sql` covers profiles, projects, subtasks, composite ownership, profile bootstrap, and queue-function ACLs; it runs in a transaction and rolls back | **Passed 2026-11-19** on disposable Supabase project DaymarkTest (`nctorjcauabycyzdmxxy`); production migration applied with approval and metadata verified |
+| Production browser regression | Deployed login, workspace, Settings load, owner-filtered profile request, unchanged Settings save, and console | **Passed 2026-11-19** on production commit `fc96685` using the designated test account; mobile viewport capture unavailable in Browser MCP |
 | CI | **None** | No `.github/`, no pipelines; nothing runs automatically on push |
 | Coverage reporting | **None** | No coverage config |
 
@@ -86,6 +87,12 @@ The following is the coverage Daymark requires before trusting changes. It is
   `service_role` can. The two-user isolation SQL was not run against
   production. A post-migration notification delivery was not exercised. Never
   run the synthetic-user test against production.
+
+The production deployment for commit `fc96685` reached Vercel **READY**; its
+build completed successfully, including TypeScript and static page generation.
+The local `npm run build` command remains blocked by the sandbox's restriction
+on Turbopack binding a port. The browser regression covered desktop only; no
+mobile screenshot was captured because Browser MCP exposes no viewport control.
 
 ### Integration-specific tests
 

@@ -60,8 +60,10 @@ remain separate backlog work and are not part of this database security task.
 green, and S1/S2/ENG-3 statuses reflect only verified completion. Current
 status: migration and isolation test passed on DaymarkTest; production
 metadata confirms the migration's intended state; local lint, typecheck, and
-unit checks pass. A post-migration worker delivery was not exercised, and the
-production build check is blocked by the local environment's process-bind
+unit checks pass. Commit `fc96685` is deployed to production and the Vercel
+build passed; desktop login/workspace/Settings regression checks passed. A
+post-migration worker delivery and mobile viewport run were not performed.
+The local production build remains blocked by the environment's process-bind
 restriction. Other Phase 1 items remain in progress as shown in the roadmap.
 
 ## Phase 2 — Integrations
