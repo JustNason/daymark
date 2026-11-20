@@ -7,7 +7,7 @@ A focused Chrome/Chromium Manifest V3 extension that reads coursework already re
 1. From this directory, run `npm install` and `npm run build`.
 2. In Chrome or Edge, open the Extensions page, enable Developer mode, and choose **Load unpacked**.
 3. Select this directory's `dist/` folder.
-4. In Daymark Settings, create an extension pairing code. Open the extension settings, enter the Daymark HTTPS origin and one-time code, then choose **Pair extension**. Local development may use `http://localhost`.
+4. Open the extension, enter your Daymark HTTPS address, and choose **Continue**. This opens Daymark in a regular browser tab, where you can sign in normally. In **Settings → Integrations → Schoology**, create a one-time code, return to the extension, paste the code, and choose **Connect extension**. Local development may use `http://localhost`.
 5. Open a signed-in Schoology home, courses, or course page. Choose **Scan page**, review the detected data, then choose **Sync to Daymark**.
 
 After source changes, run `npm run build`; reload the unpacked extension from the browser extensions page. `npm test` builds and runs fixture tests. `npm run check` is the same combined verification command.
@@ -18,7 +18,7 @@ After source changes, run `npm run build`; reload the unpacked extension from th
 - `storage`: keep the last scan, connection address, and revocable Daymark extension token in extension-local storage.
 - Optional host access: requested for the exact Daymark origin entered by the user. It is used for pairing, status, revocation, and sync requests.
 
-The extension does not read cookies, use the Schoology API, persist rendered page HTML, or send data before the user presses Sync. The temporary HTML snapshot is parsed in the popup and only normalized values are kept. Schoology page data is not sent to a third-party provider.
+The extension does not read cookies, use the Schoology API, persist rendered page HTML, or send data before the user presses Sync. The temporary HTML snapshot is parsed in the popup and only normalized values are kept. Schoology page data is not sent to a third-party provider. Daymark sign-in stays in the normal Daymark browser page; the extension never asks for a Daymark password.
 
 ## Extraction and compatibility
 
@@ -43,7 +43,7 @@ The extension accepts only Daymark's token from pairing; it never sends a user I
 - **Unsupported page:** navigate to the Schoology home, course list, or a specific course. For a custom school domain, add its hostname under connection settings.
 - **No records detected:** confirm the page is signed in and fully loaded, then scan the course materials page. Layout variations may need a future adapter update.
 - **More pages available:** open the next page shown by Schoology and scan it; each scan contributes only the currently rendered page.
-- **Pairing failed:** generate a new code in Daymark Settings. Codes are single-use and short-lived.
+- **Pairing failed:** generate a new code in Daymark Settings. Codes are single-use and expire after ten minutes.
 - **Sync rejected:** confirm Daymark's origin and pair again if the token was revoked.
 
 Automated fixture tests cover supported page detection, normalized dates, rendered course and assignment extraction, malformed fields, duplicate assignment IDs, and pagination warnings. No live authenticated Schoology account was available for compatibility verification; fixture results do not claim live support for every institution.

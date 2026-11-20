@@ -19,13 +19,14 @@ const scanButton = $("#scan") as HTMLButtonElement;
 const syncButton = $("#sync") as HTMLButtonElement;
 const connectButton = $("#connect") as HTMLButtonElement;
 const disconnectButton = $("#disconnect") as HTMLButtonElement;
-const settingsPanel = $("#settings-panel");
+const pairingFields = $("#pairing-fields");
 const originInput = $("#daymark-origin") as HTMLInputElement;
 const schoologyHostInput = $("#schoology-host") as HTMLInputElement;
 const codeInput = $("#pairing-code") as HTMLInputElement;
-const saveButton = $("#save-settings") as HTMLButtonElement;
-const settingsButton = $("#settings-toggle") as HTMLButtonElement;
 const openDaymarkButton = $("#open-daymark") as HTMLButtonElement;
+const openDaymarkConnectButton = $(
+  "#open-daymark-connect",
+) as HTMLButtonElement;
 let currentSnapshot: SchoologySnapshot | undefined;
 let isConnected = false;
 
@@ -181,7 +182,10 @@ connectButton.addEventListener("click", async () => {
     const origin = validatedOrigin(originInput.value.trim());
     const code = codeInput.value.trim();
     if (!code)
-      throw new Error("Enter the one-time pairing code from Daymark Settings.");
+      throw new Error(
+        "Create a one-time pairing code in Daymark, then paste it here.",
+      );
+    const schoologyHost = validatedSchoologyHost(schoologyHostInput.value);
     await ensurePermission(origin);
     const response = await fetch(`${origin}/api/schoology/extension/pair`, {
       method: "POST",
@@ -202,6 +206,7 @@ connectButton.addEventListener("click", async () => {
     }
     await saveSettings({
       daymarkOrigin: origin,
+      schoologyHost,
       token: body.token,
       connectedAt: new Date().toISOString(),
     });
@@ -350,49 +355,34 @@ async function refreshSettings() {
     : "Daymark not connected";
   document.querySelector("#connection-dot")!.className =
     `dot ${connected && connectionStatusAvailable ? "dot--on" : ""}`;
+  document.querySelector("#connection-badge")!.textContent = connected
+    ? "Connected"
+    : "Not connected";
+  document.querySelector<HTMLElement>("#connection-intro")!.textContent =
+    connected
+      ? "Your Daymark workspace is linked. Scan Schoology and sync coursework when you are ready."
+      : "Continue in Daymark to sign in and create a one-time code. Your Daymark password stays on Daymark.";
+  document.querySelector<HTMLElement>("#connection-address")!.hidden =
+    connected;
+  document.querySelector<HTMLElement>("#advanced-settings")!.hidden = connected;
   disconnectButton.hidden = !connected;
   connectButton.hidden = connected;
+  pairingFields.hidden = connected;
   syncButton.disabled = !connected || !currentSnapshot?.assignments.length;
 }
 
-settingsButton.addEventListener("click", () => {
-  settingsPanel.hidden = !settingsPanel.hidden;
-  if (!settingsPanel.hidden) originInput.focus();
-});
-saveButton.addEventListener("click", async () => {
-  try {
-    const origin = originInput.value.trim()
-      ? validatedOrigin(originInput.value.trim())
-      : "";
-    const schoologyHost = schoologyHostInput.value
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .split("/")[0];
-    if (
-      schoologyHost &&
-      !/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(schoologyHost)
-    )
-      throw new Error(
-        "Enter a valid Schoology host name, such as school.example.edu.",
-      );
-    const settings = await getSettings();
-    await saveSettings({
-      daymarkOrigin: origin,
-      schoologyHost,
-      ...(settings.daymarkOrigin === origin
-        ? { token: settings.token, connectedAt: settings.connectedAt }
-        : {}),
-    });
-    setStatus("Connection address saved.", "success");
-    settingsPanel.hidden = true;
-  } catch (error) {
-    setStatus(
-      error instanceof Error ? error.message : "Could not save settings.",
-      "error",
+function validatedSchoologyHost(value: string): string | undefined {
+  const host = value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .split("/")[0];
+  if (host && !/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(host))
+    throw new Error(
+      "Enter a valid Schoology host name, such as school.example.edu.",
     );
-  }
-});
+  return host || undefined;
+}
 disconnectButton.addEventListener("click", async () => {
   const settings = await getSettings();
   if (!settings.token) return;
@@ -422,17 +412,35 @@ disconnectButton.addEventListener("click", async () => {
     disconnectButton.disabled = false;
   }
 });
-openDaymarkButton.addEventListener("click", async () => {
-  const settings = await getSettings();
-  if (!settings.daymarkOrigin) {
+async function continueWithDaymark() {
+  try {
+    const origin = validatedOrigin(originInput.value.trim());
+    const settings = await getSettings();
+    const schoologyHost = validatedSchoologyHost(schoologyHostInput.value);
+    await saveSettings({
+      daymarkOrigin: origin,
+      schoologyHost,
+      ...(settings.daymarkOrigin === origin
+        ? { token: settings.token, connectedAt: settings.connectedAt }
+        : {}),
+    });
+    chrome.tabs.create({ url: `${origin}/app` });
     setStatus(
-      "Add your Daymark address in connection settings first.",
+      "Daymark opened. Sign in and create a pairing code in Settings → Schoology.",
+    );
+  } catch (error) {
+    setStatus(
+      error instanceof Error ? error.message : "Enter a valid Daymark address.",
       "error",
     );
-    return;
+    originInput.focus();
   }
-  chrome.tabs.create({ url: settings.daymarkOrigin });
-});
+}
+openDaymarkButton.addEventListener("click", () => void continueWithDaymark());
+openDaymarkConnectButton.addEventListener(
+  "click",
+  () => void continueWithDaymark(),
+);
 scanButton.addEventListener("click", scan);
 
 void (async () => {

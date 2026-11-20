@@ -14,22 +14,84 @@
         <div class="brand-lockup">
           <strong>daymark</strong><span>coursework bridge</span>
         </div>
-        <button
-          id="settings-toggle"
-          class="icon-button"
-          type="button"
-          aria-label="Connection settings"
-          title="Connection settings"
-        >
-          ⚙
-        </button>
       </header>
 
       <section class="connection-row" aria-label="Connection status">
         <span id="connection-dot" class="dot" aria-hidden="true"></span>
         <span id="connection-label">Checking connection…</span>
         <button id="open-daymark" class="text-button" type="button">
-          Open Daymark
+          Continue with Daymark
+        </button>
+      </section>
+
+      <section class="connect-card" aria-labelledby="connect-title">
+        <div class="connect-heading">
+          <div>
+            <p class="eyebrow">DAYMARK ACCOUNT</p>
+            <h2 id="connect-title">Connect your workspace</h2>
+          </div>
+          <span id="connection-badge" class="connection-badge"
+            >Not connected</span
+          >
+        </div>
+        <p id="connection-intro" class="connect-copy">
+          Continue in Daymark to sign in and create a one-time code. Your
+          Daymark password stays on Daymark.
+        </p>
+        <div id="connection-address">
+          <label for="daymark-origin">Daymark address</label>
+          <div class="address-row">
+            <input
+              id="daymark-origin"
+              type="url"
+              inputmode="url"
+              placeholder="https://your-daymark.example"
+              autocomplete="url"
+            />
+            <button
+              id="open-daymark-connect"
+              class="button button--secondary"
+              type="button"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+        <div id="pairing-fields">
+          <label for="pairing-code">One-time pairing code</label>
+          <input
+            id="pairing-code"
+            type="text"
+            inputmode="text"
+            autocomplete="one-time-code"
+            placeholder="Paste code from Daymark"
+          />
+          <button
+            id="connect"
+            class="button button--primary connect-action"
+            type="button"
+          >
+            Connect extension
+          </button>
+        </div>
+        <details id="advanced-settings" class="advanced-settings">
+          <summary>Advanced · custom Schoology domain</summary>
+          <label for="schoology-host">Schoology host</label>
+          <input
+            id="schoology-host"
+            type="text"
+            inputmode="url"
+            placeholder="school.example.edu"
+            autocomplete="off"
+          />
+        </details>
+        <button
+          id="disconnect"
+          class="text-button disconnect-action"
+          type="button"
+          hidden
+        >
+          Disconnect extension
         </button>
       </section>
 
@@ -82,70 +144,6 @@
           Sync to Daymark
         </button>
       </div>
-
-      <section
-        id="settings-panel"
-        class="settings-panel"
-        hidden
-        aria-labelledby="settings-title"
-      >
-        <div class="settings-heading">
-          <div>
-            <p class="eyebrow">SETUP</p>
-            <h2 id="settings-title">Connect Daymark</h2>
-          </div>
-          <span class="secure-note">One-time code</span>
-        </div>
-        <label for="daymark-origin">Daymark address</label>
-        <input
-          id="daymark-origin"
-          type="url"
-          inputmode="url"
-          placeholder="https://your-daymark.example"
-          autocomplete="url"
-        />
-        <label for="schoology-host"
-          >Schoology host (custom school domains)</label
-        >
-        <input
-          id="schoology-host"
-          type="text"
-          inputmode="url"
-          placeholder="school.example.edu"
-          autocomplete="off"
-        />
-        <label for="pairing-code">Pairing code</label>
-        <input
-          id="pairing-code"
-          type="text"
-          inputmode="text"
-          autocomplete="one-time-code"
-          placeholder="Paste code from Daymark Settings"
-        />
-        <p class="privacy-copy">
-          The extension reads the Schoology page only when you choose Scan. It
-          stores a revocable Daymark token, never your Schoology password or
-          session cookies.
-        </p>
-        <div class="settings-actions">
-          <button
-            id="disconnect"
-            class="button button--secondary"
-            type="button"
-            hidden
-          >
-            Disconnect</button
-          ><button
-            id="save-settings"
-            class="button button--secondary"
-            type="button"
-          >
-            Save address</button
-          ><button id="connect" class="button button--primary" type="button">
-            Pair extension
-          </button>
-        </div>
-      </section>
     </main>
   </body>
 </html>

@@ -416,9 +416,16 @@ export function SettingsView({
         pairingCode: result.pairingCode,
         expiresAt: result.expiresAt,
       });
-      setSchoologyMessage(
-        "Enter this one-time code in the Daymark extension. It expires shortly.",
-      );
+      try {
+        await navigator.clipboard.writeText(result.pairingCode);
+        setSchoologyMessage(
+          "One-time code copied. Paste it into the Daymark extension; it expires in 10 minutes.",
+        );
+      } catch {
+        setSchoologyMessage(
+          "Enter the one-time code in the Daymark extension. It expires in 10 minutes.",
+        );
+      }
     } catch (failure) {
       setSchoologyMessage(
         failure instanceof Error
@@ -722,27 +729,26 @@ export function SettingsView({
                   disabled={schoologyBusy}
                   onClick={() => void createSchoologyPairingCode()}
                 >
-                  {schoologyBusy ? "Working…" : "Pair extension"}
+                  {schoologyBusy ? "Working…" : "Connect extension"}
                 </button>
               )}
             </div>
             <div className="schoology-extension-setup">
-              <h3>Connect the Daymark browser extension</h3>
+              <h3>Finish connecting your extension</h3>
               <ol>
                 <li>
-                  Install the Daymark Schoology extension in your browser.
+                  Open the extension and choose Continue with Daymark. Sign in
+                  here if asked.
                 </li>
                 <li>
-                  Open this page in Daymark and generate a one-time pairing
-                  code.
+                  Create a one-time code below, then paste it into the
+                  extension.
                 </li>
-                <li>
-                  Enter the code in the extension, then open Schoology and scan.
-                </li>
+                <li>Return to Schoology and scan your coursework.</li>
               </ol>
               {schoologyPairing && (
                 <div className="pairing-code">
-                  <span>One-time pairing code</span>
+                  <span>One-time code · expires in 10 minutes</span>
                   <code>{schoologyPairing.pairingCode}</code>
                   <small>
                     Expires{" "}
