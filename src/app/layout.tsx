@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description: "A calm workspace for tasks, classes, projects, and time.",
   icons: {
     icon: "/daymark-icon.svg",
-    shortcut: "/daymark-icon.svg",
+    shortcut: "/favicon.ico",
     apple: "/apple-touch-icon.png",
   },
 };
