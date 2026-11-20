@@ -17,7 +17,7 @@ After source changes, run `npm run build`; reload the unpacked extension from th
 - `activeTab` and `scripting`: read the current page only after the user opens the popup and presses Scan.
 - `storage`: keep the last scan, connection address, short-lived pairing state, and revocable Daymark extension token in extension-local storage.
 - `alarms`: resume connection polling while the popup is closed.
-- Optional host access: requested only for the exact Daymark origin selected by the user. It is used for pairing, status, revocation, and sync requests.
+- Host access: the hosted Daymark origin is declared so the first sign-in click can open without an in-popup permission interruption. Custom Daymark servers request access only to the exact origin entered in Advanced settings. Host access is used for pairing, status, revocation, and sync requests.
 
 The extension does not read cookies, use the Schoology API, persist rendered page HTML, or send data before the user presses Sync. The temporary HTML snapshot is parsed in the popup and only normalized values are kept. Schoology page data is not sent to a third-party provider. Daymark sign-in stays in the normal Daymark browser page; the extension never asks for a Daymark password.
 

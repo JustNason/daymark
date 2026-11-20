@@ -175,8 +175,10 @@ function validatedOrigin(value: string): string {
 }
 
 async function ensurePermission(origin: string): Promise<void> {
+  const originPattern = `${origin}/*`;
+  if (await chrome.permissions.contains({ origins: [originPattern] })) return;
   const granted = await chrome.permissions.request({
-    origins: [`${origin}/*`],
+    origins: [originPattern],
   });
   if (!granted)
     throw new Error(
@@ -268,9 +270,13 @@ async function startPairingFlow() {
         "Sign in to Daymark and authorize the extension in the tab that just opened.",
     });
     await chrome.alarms.create(FLOW_ALARM, { delayInMinutes: 0.5 });
-    await chrome.tabs.create({
+    const tab = await chrome.tabs.create({
       url: `${origin}/extension/schoology?flow=${encodeURIComponent(flowId)}`,
     });
+    if (!tab.id)
+      throw new Error(
+        "Chrome could not open the Daymark sign-in tab. Try again.",
+      );
     connectButton.textContent = "Waiting for approval…";
     setConnectionStatus(
       "Daymark opened in a new tab. Sign in and authorize; the extension will connect automatically.",

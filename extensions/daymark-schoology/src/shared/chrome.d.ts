@@ -39,7 +39,7 @@ declare const chrome: {
       active: boolean;
       lastFocusedWindow: boolean;
     }): Promise<ChromeTab[]>;
-    create(options: { url: string }): void;
+    create(options: { url: string }): Promise<ChromeTab>;
   };
   scripting: {
     executeScript(options: {
@@ -47,5 +47,8 @@ declare const chrome: {
       func: () => string;
     }): Promise<Array<{ result?: string }>>;
   };
-  permissions: { request(options: { origins: string[] }): Promise<boolean> };
+  permissions: {
+    contains(options: { origins: string[] }): Promise<boolean>;
+    request(options: { origins: string[] }): Promise<boolean>;
+  };
 };
