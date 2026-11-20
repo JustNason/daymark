@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status: Proposed.** Sequencing derived from the verified audit findings
+**Status: Proposed; Phase 0 complete, Phase 1 in progress.** Sequencing derived from the verified audit findings
 (2026-11-17) and the owner's stated priorities: (1) documentation of
 verified reality, (2) repair broken integrations, (3) $0/month cost ceiling,
 (4) design system + UI/UX quality, (5) roadmap/backlog visibility, (6)
@@ -13,7 +13,7 @@ security/backend, INT-x = integrations, ENG-x = engineering).
 
 ---
 
-## Phase 0 — Documentation (this effort) — **Complete (uncommitted)**
+## Phase 0 — Documentation — **Complete (committed to master 2026-11-17)**
 
 - `docs/` tree with INDEX, product/architecture/design/development/
   operations/decisions sections.
@@ -27,12 +27,12 @@ security/backend, INT-x = integrations, ENG-x = engineering).
 *No application source, migrations, dependencies, or deployments were
 modified.*
 
-## Phase 1 — Safety & correctness (do first; small, high-leverage)
+## Phase 1 — Safety & correctness — **In progress**
 
 | Item | Finding | Why first |
 | --- | --- | --- |
-| S1 | Enable RLS on `profiles` (migration gap) | Verified cross-user data exposure |
-| S2 | Revoke `EXECUTE` on `claim_notification_deliveries` + reaper for stuck `processing` rows | Verified privileged-function gap |
+| S1 | Ensure `profiles` RLS and owner filtering (migration/test passed on DaymarkTest; production migration and metadata verified) | Application code change is in the working tree and awaits normal release deployment |
+| S2 | Revoke `EXECUTE` on `claim_notification_deliveries` (migration and ACL assertions verified on DaymarkTest and production) | Worker delivery after restriction was not live-tested |
 | S3/S4 | Constant-time cron secret compare; add CSP | Match SECURITY.md claims |
 | UI-07 | Keep modals open on save failure | Silent data loss on the core workflow |
 | UI-08 | Unify datetime I/O on `src/lib/timezone.ts` | Silent date-shift bug |

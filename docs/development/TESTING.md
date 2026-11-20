@@ -1,7 +1,7 @@
 # Testing
 
 **Status legend used here:** the "Current status" section reports verified
-reality (checked 2026-11-17); everything else is a **target**, not an achieved
+reality as of 2026-11-19; everything else is a **target**, not an achieved
 state.
 
 ## Commands
@@ -21,7 +21,7 @@ npm run test:e2e    # Playwright (chromium + Pixel 7 against a dev server)
 | Unit | 6 tests: `tests/scheduling.test.ts` (4 — deadline priority, session splitting, busy-period avoidance, working hours, empty range, timezone/DST) and `tests/timezone.test.ts` (2 — wall-time round-trips, 23/25-hour DST days) | Real coverage of the deterministic scheduler |
 | Integration | **None** | No test exercises persistence, auth, or API routes |
 | End-to-end | 1 smoke test: `tests/e2e/setup.spec.ts` asserts the `/login` page renders controls | No login or authenticated flow is performed |
-| Database / RLS | `supabase/tests/rls_isolation.sql` exists (two fake users, asserts no cross-user reads, rolls back) | **Never run by any script, doc, or CI** — must be run manually in a disposable Supabase project |
+| Database / RLS | `supabase/tests/rls_isolation.sql` covers profiles, projects, subtasks, composite ownership, profile bootstrap, and queue-function ACLs; it runs in a transaction and rolls back | **Passed 2026-11-19** on disposable Supabase project DaymarkTest (`nctorjcauabycyzdmxxy`); production migration applied with approval and metadata verified |
 | CI | **None** | No `.github/`, no pipelines; nothing runs automatically on push |
 | Coverage reporting | **None** | No coverage config |
 
@@ -45,9 +45,12 @@ The following is the coverage Daymark requires before trusting changes. It is
 ### Integration
 
 - Account lifecycle; task/project/calendar persistence.
-- **RLS isolation across two users** (wire up
-  [`supabase/tests/rls_isolation.sql`](../../supabase/tests/rls_isolation.sql)
-  into the workflow first).
+- **RLS isolation across two users** using
+  [`supabase/tests/rls_isolation.sql`](../../supabase/tests/rls_isolation.sql):
+  A/B profile reads and writes, project and subtask read isolation, a
+  cross-owner child attach rejected by the existing composite FK, profile
+  bootstrap, and effective PUBLIC/anon/authenticated/service_role function
+  privileges. The expanded test passed on DaymarkTest on 2026-11-19.
 - Assignment sync idempotency and personal-override preservation.
 - Scheduling proposal accept/reject persistence.
 - Notification generation, retry, deduplication, and quiet-hours deferral.
@@ -63,8 +66,26 @@ The following is the coverage Daymark requires before trusting changes. It is
 
 ### Database
 
-- RLS isolation (SQL test above) after every migration change.
-- Migration applies cleanly from empty on a disposable project.
+- Apply migrations in order to a **disposable Supabase project** using its
+  database-owner SQL Editor session. `supabase/tests/rls_isolation.sql` also
+  requires owner privileges to insert synthetic `auth.users`, inspect
+  `pg_policies`/function ACL metadata, and `SET ROLE authenticated`. Run the
+  entire file as one script; its transaction rolls back users and records.
+- Never run this setup test against production or a database containing real
+  users. It does not call the notification claim function; it checks effective
+  privileges through PostgreSQL metadata functions.
+- After every migration change, run the isolation SQL and confirm the
+  migration applies cleanly from empty on that disposable project.
+- **2026-11-19 status:** migrations `0001_daymark.sql` and
+  `0002_security_hardening.sql` were applied to the fresh, disposable
+  DaymarkTest project (`nctorjcauabycyzdmxxy`), and the isolation SQL passed
+  as the database-owner `postgres` role. The migration was subsequently
+  applied to production Daymark (`iytnacmrgfaykxdiurzw`) with explicit
+  approval. Metadata verifies profiles RLS and `profile_owner`; production
+  anon/authenticated/PUBLIC cannot execute the claim function and
+  `service_role` can. The two-user isolation SQL was not run against
+  production. A post-migration notification delivery was not exercised. Never
+  run the synthetic-user test against production.
 
 ### Integration-specific tests
 

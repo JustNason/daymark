@@ -5,8 +5,12 @@ lives in the owning document** (one source of truth per subject) — this file
 is the cross-cutting index and status tracker.
 
 **Status values:** Open · In progress · Done · Deferred · Needs decision.
-All items are **Open** as of 2026-11-17 unless noted. Nothing in this
-backlog has been implemented; it records recommended work only.
+As of 2026-11-19, S1, S2, and ENG-3 are **Done** for the scoped Phase 1
+acceptance: migrations and isolation assertions passed on disposable
+DaymarkTest, the migration was applied to production with explicit approval,
+and production metadata confirms the resulting settings. The two-user SQL
+test was not run against production; CI automation remains separately tracked
+under ENG-1.
 
 Priority: **P1** major defect · **P2** notable · **P3** polish · **Sec-High/
 Med** security severity.
@@ -21,8 +25,8 @@ Full detail: [../architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md)
 
 | ID | Item | Sev | Notes |
 | --- | --- | --- | --- |
-| S1 | Enable RLS on `profiles` — migration:197 loop omits it; `profile_owner` policy inert; client read lacks owner filter (`page.tsx:3030`) | **High** | Requires new migration (out of scope for doc task) |
-| S2 | Revoke `EXECUTE` on `claim_notification_deliveries` from `public`/`anon`; add reaper returning stale `processing` rows to `retry` | **High** | `SECURITY DEFINER`, no revocation in migration:204-205 |
+| S1 | Ensure RLS is enabled on `profiles` and add an explicit owner filter to the Settings profile read | **High** | **Done** — migration and two-user profile assertions passed on DaymarkTest; production migration and RLS metadata verified; Settings query is explicitly user-filtered in source. Updated application code has not been deployed. |
+| S2 | Restrict `EXECUTE` on `claim_notification_deliveries(integer)` to `service_role` | **High** | **Done** — test and production metadata confirm PUBLIC/anon/authenticated denied and service_role allowed. Worker source uses the service-role client; live delivery after restriction was not exercised. A stuck-row reaper remains separate future work |
 | S3 | Constant-time cron secret comparison (`timingSafeEqual` on hashes) | Med | `api/cron/notifications/route.ts:60` |
 | S4 | Add Content-Security-Policy to `next.config.ts` | Med | None exists today |
 | S5 | Server-side session gate (`middleware.ts`) for `/app` | Med | Defense-in-depth; RLS remains the boundary |
@@ -69,7 +73,7 @@ Full detail: [../development/TESTING.md](../development/TESTING.md),
 | --- | --- | --- |
 | ENG-1 | CI workflow (lint, typecheck, test, build, prettier check) | No `.github/` today |
 | ENG-2 | Prettier config + full format pass | 10 files fail `prettier --check` |
-| ENG-3 | Wire `supabase/tests/rls_isolation.sql` into a documented/automated run; expand to `profiles`, writes, composite-FK attaches | Exists, never run |
+| ENG-3 | Document and expand `supabase/tests/rls_isolation.sql` for profiles, writes, child isolation, and function ACLs | **Done** — expanded SQL passed on DaymarkTest (2026-11-19); CI automation remains open under ENG-1 |
 | ENG-4 | E2e against production build + core-journey coverage | Today: 1 login-page smoke test |
 | ENG-5 | Dependency hygiene: remove (or adopt) `react-hook-form`, `@hookform/resolvers`, `@dnd-kit/*`, `cva`, `oauth-1.0a`; decide react-query; add `engines` | TECH_STACK § hygiene |
 | ENG-6 | `.gitignore`: add `.vercel/`, `.DS_Store`, `*.log`; untrack `next-env.d.ts` per Next 16 docs; repair dangling `skills/` symlinks | |

@@ -2983,7 +2983,7 @@ function SettingsView({
   onTimezoneChange,
   onSignOut,
 }: {
-  user: { email?: string } | null;
+  user: { id: string; email?: string } | null;
   integrations: IntegrationState[];
   onTimezoneChange: (timezone: string) => void;
   onSignOut: () => void;
@@ -3015,6 +3015,7 @@ function SettingsView({
   const schoologyIntegration = integrations.find((item) => item.provider === "schoology");
   const discordIntegration = integrations.find((item) => item.provider === "discord");
   useEffect(() => {
+    if (!user?.id) return;
     const c = createClient();
     c?.from("user_preferences")
       .select("theme,timezone,workday_start,workday_end,week_starts_on")
@@ -3030,6 +3031,7 @@ function SettingsView({
       });
     c?.from("profiles")
       .select("display_name")
+      .eq("id", user.id)
       .maybeSingle()
       .then(({ data }) => {
         if (data?.display_name) setDisplayName(data.display_name);
@@ -3038,7 +3040,7 @@ function SettingsView({
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("Could not read AI provider status")))
       .then((result: { configured: boolean }) => setAiConfigured(result.configured))
       .catch(() => setAiConfigured(null));
-  }, []);
+  }, [user?.id]);
   useEffect(() => {
     const applyTheme = (event: globalThis.Event) => {
       const nextTheme = (event as CustomEvent<string>).detail;

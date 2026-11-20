@@ -1,11 +1,12 @@
 # Implementation Plan
 
-**Status: Proposed — nothing below has been implemented.** This plan
-sequences the actual repair/refactor work derived from the audit. It is
-deliberately separate from the documentation effort: **Phase D (docs) was
-executed alone and touched only Markdown files**; every subsequent phase
-involves application code, migrations, or configuration and must be planned,
-reviewed, and committed on its own.
+**Status: Phase 0 complete; Phase 1 in progress.** This plan sequences the
+repair/refactor work derived from the audit. Phase 0 (documentation) was
+committed to `master` on 2026-11-17. Phase 1 is underway. Production metadata
+confirms profiles RLS is enabled. Migrations `0001` and `0002` plus the
+expanded rollback-only isolation test passed on disposable DaymarkTest on
+2026-11-19. Migration `0002` was then applied to production with explicit
+approval; production metadata confirms the expected policy and ACLs.
 
 - Findings source: [../docs/product/BACKLOG.md](../docs/product/BACKLOG.md)
 - Sequencing rationale: [../docs/product/ROADMAP.md](../docs/product/ROADMAP.md)
@@ -14,10 +15,9 @@ reviewed, and committed on its own.
 
 ---
 
-## Phase D — Documentation (executed 2026-11-17, uncommitted)
+## Phase 0 — Documentation (executed and committed 2026-11-17)
 
-**Scope rule: Markdown only.** Git status must show only `*.md` changes
-(plus the generated `AGENTS.md` block, preserved verbatim).
+**Scope rule: Markdown only.**
 
 Delivered:
 
@@ -34,29 +34,35 @@ Delivered:
    evidence recorded in [docs/operations/INTEGRATIONS.md](../docs/operations/INTEGRATIONS.md) /
    [docs/operations/VERCEL_ENVIRONMENT_SETUP.md](../docs/operations/VERCEL_ENVIRONMENT_SETUP.md).
 
-**Exit:** link validation passes; `git status` shows Markdown-only changes;
-no source/migration/dependency/deployment touched. Work left **uncommitted**
-per task constraints — the owner decides when to commit.
+**Exit:** documentation was committed to `master`; no source, migration,
+dependency, or deployment changes were part of Phase 0.
 
-## Phase 1 — Safety & correctness (next; code + one migration)
+## Phase 1 — Safety & correctness (**In progress**)
 
 Order of operations:
 
-1. **Migration `0002_…`:** `ALTER TABLE profiles ENABLE ROW LEVEL SECURITY`
-   (S1); `REVOKE EXECUTE … FROM public, anon` on
-   `claim_notification_deliveries` + grant to `service_role` (S2); add the
-   four missing indexes (S-idx). Include a `pg_class` self-check query in the
-   migration header so future tables can't silently skip RLS.
-2. **Client fix:** owner-filtered profile read (`page.tsx:3030`).
-3. **Cron route:** constant-time secret compare (S3).
-4. **UI micro-fixes that don't need the component library:** UI-07 (keep
-   modal open on failure), UI-08 (timezone helpers), UI-09 (delete
-   confirm/undo).
-5. Expand `supabase/tests/rls_isolation.sql` (profiles, writes, composite-FK
-   cross-user attach) and run it on a disposable Supabase project.
+1. **Migration `0002_security_hardening.sql`:** enable RLS on `profiles`
+   (preserving `profile_owner`); revoke `EXECUTE` on the exact notification
+   function signature from PUBLIC, `anon`, and `authenticated`; grant it to
+   `service_role`.
+2. **Client defense in depth:** filter the Settings profile read by the
+   authenticated user's ID.
+3. Expand `supabase/tests/rls_isolation.sql` to cover profile reads/writes,
+   project and child isolation, composite-FK attachment, bootstrap behavior,
+   and function ACLs. Run it on a disposable Supabase project; this passed on
+   DaymarkTest on 2026-11-19. Read-only production metadata was inspected
+   separately; no production writes were made.
 
-**Exit:** expanded RLS test passes; gate green; findings S1/S2/UI-07/08/09
-marked Done in BACKLOG with evidence.
+Other Phase 1 roadmap items (cron timing safety, UI-07/08/09, and indexes)
+remain separate backlog work and are not part of this database security task.
+
+**Exit:** expanded RLS test passes in a disposable database, local gate is
+green, and S1/S2/ENG-3 statuses reflect only verified completion. Current
+status: migration and isolation test passed on DaymarkTest; production
+metadata confirms the migration's intended state; local lint, typecheck, and
+unit checks pass. A post-migration worker delivery was not exercised, and the
+production build check is blocked by the local environment's process-bind
+restriction. Other Phase 1 items remain in progress as shown in the roadmap.
 
 ## Phase 2 — Integrations
 

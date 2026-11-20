@@ -1,13 +1,19 @@
 # Database
 
 PostgreSQL schema on Supabase. **The SQL migrations are the source of truth**
-for everything in this document; when this file and
-[`supabase/migrations/0001_daymark.sql`](../../supabase/migrations/0001_daymark.sql)
-disagree, the migration wins and this file is stale — report it.
+for everything in this document; when this file and the SQL migration files
+in [`supabase/migrations/`](../../supabase/migrations/) disagree, the
+migrations win and this file is stale — report it.
 
-**Migration inventory (2026-11-17):** one migration, `0001_daymark.sql`
-(205 lines), plus non-schema SQL in `supabase/cron/notifications.sql` (cron
-job) and `supabase/tests/rls_isolation.sql` (manual test). There is no
+**Migration inventory (2026-11-19):** `0001_daymark.sql` defines the initial
+schema and `0002_security_hardening.sql` adds the profiles RLS enablement and
+notification RPC grants. It was applied to the disposable `DaymarkTest`
+project (`nctorjcauabycyzdmxxy`) and production Daymark
+(`iytnacmrgfaykxdiurzw`) on 2026-11-19. The rollback-only isolation test
+passed on DaymarkTest. Post-migration production metadata confirms RLS and
+function ACLs match the intended settings. Non-schema SQL also exists
+in `supabase/cron/notifications.sql` (cron job) and
+`supabase/tests/rls_isolation.sql` (manual rollback-only test). There is no
 `supabase/config.toml`; apply via the Supabase SQL editor (see
 [DEPLOYMENT.md](../operations/DEPLOYMENT.md)).
 
@@ -102,26 +108,34 @@ assignment_id)` (queried per assignment during sync), `subtasks(task_id)`,
   creating policy `owner_all`
   (`USING`/`WITH CHECK user_id = (select auth.uid())`), plus policy `profile_owner`
   on `profiles` (migration:202).
-- **VERIFIED GAP — `profiles` RLS is not enabled.** The loop list omits
-  `profiles` and no other statement enables RLS on it, so `profile_owner` is
-  inert: any authenticated client can read/modify any user's `profiles` row
-  through PostgREST. (The client compounds this by reading the profile with
-  no owner filter, `src/app/app/page.tsx:3030`.) Fixing this requires a new
-  migration — out of scope for the documentation task; tracked in
-  [BACKLOG.md](../product/BACKLOG.md). **Never disable RLS to repair a
-  client query; add new tables to the migration's ownership list before
-  exposing them.**
-- All policies are permissive with no `TO` clause; `auth.uid()` is NULL for
-  `anon`, so anon sees nothing (subject to the profiles gap above).
-- `supabase/tests/rls_isolation.sql` verifies cross-user read isolation on
-  `projects` only (manual; nothing runs it automatically — see
-  [TESTING.md](../development/TESTING.md)).
+- `0001_daymark.sql` omits `profiles` from its RLS loop. In DaymarkTest,
+  migration `0002_security_hardening.sql` enabled RLS and the rollback-only
+  two-user test verified the existing owner policy blocks cross-user profile
+  reads and writes. Read-only production
+  metadata on 2026-11-19 showed RLS enabled (`relrowsecurity=true`,
+  `relforcerowsecurity=false`) and the existing `profile_owner` policy active
+  for `{public}`, with both `USING` and `WITH CHECK` scoped to
+  `id = (select auth.uid())`. Migration `0002_security_hardening.sql` makes
+  this state reproducible. The isolation SQL passed in DaymarkTest; production
+  metadata after migration confirms RLS and the policy are active, but the
+  cross-user test itself was not run against production. The Settings profile read now also filters
+  by the authenticated user's ID in `src/app/app/page.tsx`.
+- Production grants `anon`, `authenticated`, and `service_role` SQL
+  SELECT/INSERT/UPDATE/DELETE on profiles. `anon` and `authenticated` do not
+  bypass RLS; `service_role` does. The owner policy remains the authorization
+  boundary for browser roles.
+- All ownership policies are permissive with no `TO` clause; `auth.uid()` is
+  NULL for `anon`, so anon sees no profile rows under `profile_owner`.
+- `supabase/tests/rls_isolation.sql` now checks profile SELECT/INSERT/UPDATE/
+  DELETE boundaries, project and child-row isolation, composite-FK ownership,
+  bootstrap behavior, and function ACLs. It passed in DaymarkTest on
+  2026-11-19; see [TESTING.md](../development/TESTING.md).
 
 ## Functions and triggers
 
 | Object | Definition | Notes |
 | --- | --- | --- |
-| `claim_notification_deliveries(batch_size)` | `SECURITY DEFINER`, `search_path=''`, `FOR UPDATE SKIP LOCKED`, caps batch at 100, sets `processing` + `attempts+1` (migration:176-185) | **VERIFIED GAP:** no `REVOKE EXECUTE` (grants at :204-205 cover tables only); Postgres default grants EXECUTE to PUBLIC and Supabase exposes it over `/rpc/`. Exploitability depends on project defaults — verify live, then revoke to `service_role` only |
+| `claim_notification_deliveries(batch_size)` | `SECURITY DEFINER`, `search_path=''`, `FOR UPDATE SKIP LOCKED`, caps batch at 100, sets `processing` + `attempts+1` (migration:176-185); `0002_security_hardening.sql` revokes PUBLIC/anon/authenticated and grants `service_role` | DaymarkTest and production metadata on 2026-11-19 confirmed anon/authenticated/PUBLIC denied and service_role allowed; production owner is `postgres` and `search_path=""`. Worker code uses its service-role client (`src/app/api/cron/notifications/route.ts:139-142`), so its required EXECUTE permission is preserved. A post-migration live delivery was not exercised. |
 | `bootstrap_profile()` trigger | `AFTER INSERT ON auth.users` → creates `profiles`, `user_preferences`, `notification_preferences` (migration:187-194) | the only trigger |
 
 No views exist in the schema.

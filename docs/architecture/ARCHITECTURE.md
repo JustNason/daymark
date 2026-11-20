@@ -224,25 +224,22 @@ and BACKLOG):
   is allowlisted (no open redirect).
 - Full operating rules: [SECURITY.md](../../SECURITY.md).
 
-### Verified security gaps (documentation-time findings)
+### Security findings and migration status
 
-These are **facts**, recorded so they are not lost; fixing them requires
-migration/code changes that are out of scope for this documentation task and
-are tracked in [BACKLOG.md](../product/BACKLOG.md):
+The 2026-11-17 audit found `profiles` absent from the migration's RLS loop
+(migration:197), leaving `profile_owner` inert in a fresh install, and found
+no EXECUTE revoke on the `SECURITY DEFINER` notification claim function
+(migration:176-185, grants:204-205 only cover tables). Migration
+`0002_security_hardening.sql` and an explicit Settings owner filter are now
+implemented in the working tree. Both migrations and the rollback-only
+isolation test passed on disposable DaymarkTest on 2026-11-19. Migration 0002
+was applied to production with explicit approval; post-migration metadata
+confirms profiles RLS and its owner policy are active and
+PUBLIC/anon/authenticated cannot execute the notification claim function.
+See [DATABASE.md](DATABASE.md) for the exact code and verification status.
 
-1. **`profiles` RLS is never enabled.** The migration's policy-enabling loop
-   (migration:197) omits `profiles`, so the `profile_owner` policy
-   (migration:202) is inert — any authenticated client can read/modify other
-   users' `profiles` through PostgREST. The client also reads the profile
-   without an owner filter (`page.tsx:3030`). This contradicts the previous
-   DATABASE.md claim that RLS covers every user-owned table.
-2. **`claim_notification_deliveries` is `SECURITY DEFINER` with no EXECUTE
-   revocation** (migration:176-185, grants:204-205 only cover tables) —
-   Postgres grants EXECUTE to PUBLIC by default and Supabase exposes public
-   functions over PostgREST `/rpc/`. Exploitability depends on project
-   default privileges (runtime verification needed) but the gap is verified.
-3. No CSP header; cron secret comparison is not constant-time (see
-   SECURITY.md for the corrected statements).
+Other findings remain open: no CSP header and the cron secret comparison is
+not constant-time (see SECURITY.md and BACKLOG.md).
 
 ## Known architectural limits
 
