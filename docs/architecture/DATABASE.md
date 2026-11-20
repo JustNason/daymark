@@ -7,10 +7,12 @@ migrations win and this file is stale — report it.
 
 **Migration inventory (2026-11-19):** `0001_daymark.sql` defines the initial
 schema, `0002_security_hardening.sql` adds the profiles RLS enablement and
-notification RPC grants, and `0003_hot_path_indexes.sql` adds four additive
-indexes for push subscription, assignment, subtask, and comment lookups. The
-third migration has not yet been applied or verified against a database. The
-second migration was applied to the disposable `DaymarkTest`
+notification RPC grants, `0003_hot_path_indexes.sql` adds four additive
+indexes for push subscription, assignment, subtask, and comment lookups, and
+`0004_schoology_extension_pairing.sql` adds the extension pairing codes,
+hashed revocable tokens, rate limits, and server-only pairing RPCs. The third
+and fourth migrations have not been verified against production. The second
+migration was applied to the disposable `DaymarkTest`
 project (`nctorjcauabycyzdmxxy`) and production Daymark
 (`iytnacmrgfaykxdiurzw`) on 2026-11-19. The rollback-only isolation test
 passed on DaymarkTest. Post-migration production metadata confirms RLS and

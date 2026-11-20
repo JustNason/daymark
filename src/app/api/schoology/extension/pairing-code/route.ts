@@ -7,6 +7,30 @@ import { createAdminClient } from "@/lib/supabase/admin";
 const CODE_LIFETIME_MS = 10 * 60 * 1000;
 const MAX_CODES_PER_HOUR = 5;
 
+function databaseErrorResponse(
+  operation: string,
+  error: { code?: string; message?: string },
+) {
+  // Keep database details in server logs only; never include them in the API response.
+  console.error("Schoology pairing code database error", {
+    operation,
+    code: error.code,
+    message: error.message,
+  });
+  if (error.code === "42P01" || error.code === "PGRST205")
+    return NextResponse.json(
+      {
+        error:
+          "Schoology pairing is not set up on this Daymark server. The administrator must apply database migration 0004_schoology_extension_pairing.sql.",
+      },
+      { status: 503 },
+    );
+  return NextResponse.json(
+    { error: "Could not create a pairing code. Try again shortly." },
+    { status: 500 },
+  );
+}
+
 export async function POST(request: Request) {
   const auth = await requireUser();
   if (!auth.ok) return auth.response;
@@ -32,11 +56,7 @@ export async function POST(request: Request) {
     .select("id", { count: "exact", head: true })
     .eq("user_id", auth.user.id)
     .gte("created_at", since);
-  if (countError)
-    return NextResponse.json(
-      { error: "Could not create a pairing code" },
-      { status: 500 },
-    );
+  if (countError) return databaseErrorResponse("count", countError);
   if ((count || 0) >= MAX_CODES_PER_HOUR)
     return NextResponse.json(
       { error: "Too many pairing codes. Try again later." },
@@ -45,11 +65,12 @@ export async function POST(request: Request) {
 
   // A new code supersedes any older unconsumed code for this account.
   const now = new Date();
-  await db
+  const { error: supersedeError } = await db
     .from("schoology_extension_pairing_codes")
     .update({ consumed_at: now.toISOString() })
     .eq("user_id", auth.user.id)
     .is("consumed_at", null);
+  if (supersedeError) return databaseErrorResponse("supersede", supersedeError);
 
   const pairingCode = randomBytes(14).toString("hex").toUpperCase();
   const expiresAt = new Date(now.getTime() + CODE_LIFETIME_MS).toISOString();
@@ -58,11 +79,7 @@ export async function POST(request: Request) {
     code_hash: hashExtensionSecret(pairingCode),
     expires_at: expiresAt,
   });
-  if (error)
-    return NextResponse.json(
-      { error: "Could not create a pairing code" },
-      { status: 500 },
-    );
+  if (error) return databaseErrorResponse("insert", error);
   return NextResponse.json(
     { pairingCode, expiresAt },
     { headers: { "Cache-Control": "no-store" } },

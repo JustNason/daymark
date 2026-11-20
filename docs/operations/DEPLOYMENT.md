@@ -6,7 +6,7 @@ Create a Supabase project on the Free plan. In Project Settings, copy the projec
 
 ## 2. Database
 
-Run [`supabase/migrations/0001_daymark.sql`](../../supabase/migrations/0001_daymark.sql) in the SQL editor or use the Supabase CLI to push migrations. Confirm every public user table has RLS enabled and the `owner_all`/`profile_owner` policies exist before adding real data.
+Apply every SQL migration in [`supabase/migrations/`](../../supabase/migrations/) in numeric order in the SQL editor, or use the Supabase CLI after configuring the project. Schoology extension pairing requires `0004_schoology_extension_pairing.sql`; the app returns a setup error if that schema is missing. Confirm every public user table has RLS enabled and the `owner_all`/`profile_owner` policies exist before adding real data. Never apply migrations to production without explicit authorization.
 
 ## 3. Authentication
 
