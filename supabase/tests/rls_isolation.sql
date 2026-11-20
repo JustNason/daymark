@@ -21,6 +21,68 @@ end $$;
 
 do $$
 declare
+  table_name text;
+  privilege_name text;
+  policy_name text;
+  fn_oid oid;
+begin
+  foreach table_name in array array[
+    'schoology_extension_pairing_codes',
+    'schoology_extension_tokens',
+    'extension_pair_rate_limits'
+  ] loop
+    if not coalesce((select relrowsecurity from pg_class where oid = format('public.%I', table_name)::regclass), false) then
+      raise exception '% RLS is disabled', table_name;
+    end if;
+  end loop;
+  foreach policy_name in array array['schoology_pairing_owner', 'schoology_extension_token_owner'] loop
+    if not exists (
+      select 1 from pg_policies
+       where schemaname = 'public' and policyname = policy_name and cmd = 'ALL'
+         and qual like '%auth.uid()%' and with_check like '%auth.uid()%'
+    ) then
+      raise exception '% owner policy is missing or not scoped to auth.uid()', policy_name;
+    end if;
+  end loop;
+  foreach table_name in array array[
+    'schoology_extension_pairing_codes',
+    'schoology_extension_tokens',
+    'extension_pair_rate_limits'
+  ] loop
+    foreach privilege_name in array array['SELECT', 'INSERT', 'UPDATE', 'DELETE'] loop
+      if has_table_privilege('anon', format('public.%I', table_name), privilege_name) or
+         has_table_privilege('authenticated', format('public.%I', table_name), privilege_name) then
+        raise exception 'Browser role has % privilege on %', privilege_name, table_name;
+      end if;
+      if not has_table_privilege('service_role', format('public.%I', table_name), privilege_name) then
+        raise exception 'service_role lacks % privilege on %', privilege_name, table_name;
+      end if;
+    end loop;
+  end loop;
+
+  foreach fn_oid in array array[
+    'public.consume_schoology_pairing_code(text,text,timestamptz)'::regprocedure::oid,
+    'public.allow_schoology_pair_attempt(text)'::regprocedure::oid
+  ] loop
+    if has_function_privilege('anon', fn_oid, 'EXECUTE') or
+       has_function_privilege('authenticated', fn_oid, 'EXECUTE') then
+      raise exception 'Untrusted role can execute extension pairing RPC %', fn_oid::regprocedure;
+    end if;
+    if not has_function_privilege('service_role', fn_oid, 'EXECUTE') then
+      raise exception 'service_role cannot execute extension pairing RPC %', fn_oid::regprocedure;
+    end if;
+    if exists (
+      select 1 from pg_proc p,
+        lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+       where p.oid = fn_oid and acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+    ) then
+      raise exception 'PUBLIC retains EXECUTE on extension pairing RPC %', fn_oid::regprocedure;
+    end if;
+  end loop;
+end $$;
+
+do $$
+declare
   fn_oid oid := 'public.claim_notification_deliveries(integer)'::regprocedure;
 begin
   if has_function_privilege('anon', fn_oid, 'EXECUTE') then
@@ -48,6 +110,54 @@ values
   ('00000000-0000-0000-0000-000000000001', 'authenticated', 'authenticated', 'rls-a@example.invalid', '', '{"full_name":"RLS User A"}', now(), now()),
   ('00000000-0000-0000-0000-000000000002', 'authenticated', 'authenticated', 'rls-b@example.invalid', '', '{"full_name":"RLS User B"}', now(), now())
 on conflict (id) do nothing;
+
+insert into public.schoology_extension_pairing_codes(user_id, code_hash, expires_at)
+values (
+  '00000000-0000-0000-0000-000000000001',
+  encode(digest('rls-pair-code-once', 'sha256'), 'hex'),
+  now() + interval '10 minutes'
+);
+
+set local role service_role;
+do $$
+declare
+  paired_user uuid;
+  i integer;
+begin
+  select public.consume_schoology_pairing_code(
+    encode(digest('rls-pair-code-once', 'sha256'), 'hex'),
+    encode(digest('rls-extension-token', 'sha256'), 'hex'),
+    now() + interval '1 year'
+  ) into paired_user;
+  if paired_user <> '00000000-0000-0000-0000-000000000001' then
+    raise exception 'Pairing RPC did not associate the code with its owning user';
+  end if;
+  select public.consume_schoology_pairing_code(
+    encode(digest('rls-pair-code-once', 'sha256'), 'hex'),
+    encode(digest('rls-second-token', 'sha256'), 'hex'),
+    now() + interval '1 year'
+  ) into paired_user;
+  if paired_user is not null then
+    raise exception 'Pairing code was reusable';
+  end if;
+  if not exists (
+    select 1 from public.schoology_extension_tokens
+     where user_id = '00000000-0000-0000-0000-000000000001'
+       and token_hash = encode(digest('rls-extension-token', 'sha256'), 'hex')
+       and revoked_at is null
+  ) then
+    raise exception 'Pairing RPC did not store the hashed token for the code owner';
+  end if;
+  for i in 1..10 loop
+    if not public.allow_schoology_pair_attempt('rls-test-rate-limit-key') then
+      raise exception 'Pair-attempt limiter blocked before its documented limit';
+    end if;
+  end loop;
+  if public.allow_schoology_pair_attempt('rls-test-rate-limit-key') then
+    raise exception 'Pair-attempt limiter allowed more than ten requests per window';
+  end if;
+end $$;
+reset role;
 
 insert into public.projects(id, user_id, name) values
   ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'A project'),

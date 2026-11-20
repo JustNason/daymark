@@ -1,6 +1,6 @@
 # Roadmap
 
-**Status: Proposed; Phase 0 complete, Phase 1 in progress.** Sequencing derived from the verified audit findings
+**Status: continuation underway (2026-11-19).** Phase 0 and Phase 1 database security are complete; Phases 2–6 have partial implementations and remaining verification/work below. Sequencing is derived from the verified audit findings
 (2026-11-17) and the owner's stated priorities: (1) documentation of
 verified reality, (2) repair broken integrations, (3) $0/month cost ceiling,
 (4) design system + UI/UX quality, (5) roadmap/backlog visibility, (6)
@@ -24,41 +24,33 @@ security/backend, INT-x = integrations, ENG-x = engineering).
   status-vs-target, DEPLOYMENT service-role scope, DATABASE table list,
   README stack claims).
 
-*No application source, migrations, dependencies, or deployments were
-modified.*
+_No application source, migrations, dependencies, or deployments were
+modified._
 
 ## Phase 1 — Safety & correctness — **In progress**
 
-| Item | Finding | Why first |
-| --- | --- | --- |
-| S1 | Ensure `profiles` RLS and owner filtering (migration/test passed on DaymarkTest; production migration and metadata verified; app filter deployed in `fc96685`) | Complete for the database security scope |
-| S2 | Revoke `EXECUTE` on `claim_notification_deliveries` (migration and ACL assertions verified on DaymarkTest and production) | Worker delivery after restriction was not live-tested |
-| S3/S4 | Constant-time cron secret compare; add CSP | Match SECURITY.md claims |
-| UI-07 | Keep modals open on save failure | Silent data loss on the core workflow |
-| UI-08 | Unify datetime I/O on `src/lib/timezone.ts` | Silent date-shift bug |
-| UI-09 | Confirm/undo for task & project delete | One-click irreversible loss |
+| Item  | Finding                                                                                                                                                        | Why first                                             |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| S1    | Ensure `profiles` RLS and owner filtering (migration/test passed on DaymarkTest; production migration and metadata verified; app filter deployed in `fc96685`) | Complete for the database security scope              |
+| S2    | Revoke `EXECUTE` on `claim_notification_deliveries` (migration and ACL assertions verified on DaymarkTest and production)                                      | Worker delivery after restriction was not live-tested |
+| S3/S4 | Constant-time cron secret compare; add CSP                                                                                                                     | Match SECURITY.md claims                              |
+| UI-07 | Keep modals open on save failure                                                                                                                               | Silent data loss on the core workflow                 |
+| UI-08 | Unify datetime I/O on `src/lib/timezone.ts`                                                                                                                    | Silent date-shift bug                                 |
+| UI-09 | Confirm/undo for task & project delete                                                                                                                         | One-click irreversible loss                           |
 
 Exit criteria: expanded `rls_isolation.sql` passes covering `profiles`;
 `npm run lint && typecheck && test && build` green.
 
-## Phase 2 — Integration repairs (owner priorities 2 & 3)
+## Phase 2 — Integrations (partially implemented)
 
-1. **Schoology (INT-1):** switch OAuth token requests to GET, validate the
-   OAuth 1.0 signature against Schoology docs, then live-test connect → sync
-   with a real account. Fallback deliverable regardless: **CSV assignment
-   import** (INT-3).
-2. **Discord (INT-2):** per-environment `DISCORD_REDIRECT_URI` (or derive
-   from request host); fix link→`discord_enabled` gap; fix misleading error
-   copy; verify mutual-server/DM viability; add `allowed_mentions`.
-3. **Push/email (INT-4/5):** reset `push_enabled` on last-unsubscribe;
-   live-test one push + one email; record dates in INTEGRATIONS.md.
-4. **Cron (INT-6):** confirm the Supabase Cron job targets the public
-   production host (not the Deployment-Protection-walled one).
+1. **Schoology:** OAuth/API sync is retired. The MV3 extension has hashed-token pairing, rendered DOM extraction, idempotent sync, and passing fixture tests. Real session compatibility remains unverified; CSV import remains open.
+2. **Discord:** code derives a valid redirect URI for the request host, enables DM preferences on successful linking, maps DM errors, and disables mentions. Live linking and receipt remain unverified.
+3. **Push/email/cron:** subscription cleanup, Resend delivery, retry logging, and cron SQL exist. Real provider receipt and deployed cron/Vault configuration remain unverified.
 
 Exit criteria: every integration row in INTEGRATIONS.md is either
-*live-tested (date recorded)* or explicitly *Not verified*.
+_live-tested (date recorded)_ or explicitly _Not verified_.
 
-## Phase 3 — UI/UX P1 fixes (owner priority 4)
+## Phase 3 — UI/UX P1 fixes (partially implemented)
 
 Ordering respects dependencies from the audit:
 
@@ -70,11 +62,11 @@ Ordering respects dependencies from the audit:
    remove dead settings · UI-11 search scope + shortcut · UI-12 auto-dismiss
    `aria-live` toasts.
 
-Exit criteria: no P1 findings open in
-[../design/UI_UX_AUDIT.md](../design/UI_UX_AUDIT.md); smoke e2e covers
-today → task create → plan → settings.
+P1 source fixes are implemented, including removal of unsupported daily/weekly
+summary controls. The smoke e2e currently verifies only the login screen, not
+the authenticated journey.
 
-## Phase 4 — Design system + structure (owner priority 4, continued)
+## Phase 4 — Design system + structure (partially implemented)
 
 - Enforce tokens (`--space-*`, type scale, radius tokens); fix
   `--text-muted` AA contrast; unify breakpoints (UI-15/16/20/22).
@@ -85,29 +77,26 @@ today → task create → plan → settings.
 - Motion pass: skeletons, modal/toast entrance, completion animation
   (UI-24); copy/metrics pass (UI-23).
 
-## Phase 5 — Engineering hardening (owner priority 5's foundation)
+## Phase 5 — Engineering hardening (partially implemented)
 
 - CI workflow: lint, typecheck, unit tests, build, prettier check, expanded
   RLS SQL test on a disposable Supabase project.
-- Prettier config + one full format pass (10 files failing today).
+- Prettier config + full formatting pass (checked 2026-11-19).
 - E2E against a production build; cover the core journey (TESTING.md
   charter).
 - Dependency hygiene: remove unused packages or adopt them; `engines` field;
   `.gitignore` additions (ENG-x items in BACKLOG).
 - Indexes for hot paths; `requireUser()` helper; curated API error messages.
 
-## Phase 6 — Contextual AI (owner priority 6 — **gated on decision**)
+## Phase 6 — Contextual AI (partially implemented)
 
-Blocked on PRD question 1 (AI philosophy + cost). If embedded assistance is
-chosen, the candidate ladder (detail in
-[../operations/INTEGRATIONS.md](../operations/INTEGRATIONS.md) § AI) is:
+The continuation request confirms embedded assistance, deterministic fallbacks, and no standalone chatbot. A1/A2/A5 have workflow implementations; the scheduler stays deterministic; A4 is a data-grounded Today hint that considers free workday windows and existing commitments. A3 explanation is available in the AI Planner, Today, and Calendar's visible range; live provider verification remains open. Provider configuration is optional and not currently available. Feature detail is in [../operations/INTEGRATIONS.md](../operations/INTEGRATIONS.md) § AI:
 
 1. **A1** natural-language quick add (highest frequency, no new screen)
 2. **A2** on-demand task breakdown in the detail modal
-3. **A3** plan explanations surfaced on Today/Calendar
+3. **A3** plan explanations surfaced in the AI Planner, Today, and Calendar
 4. **A4** "suggested next" hints (deterministic scorer first)
-5. A5 coursework steps · A6 chat surface (only if philosophy explicitly
-   approves it — conflicts with "not another chatbot")
+5. **A5** coursework steps. A6 standalone chat is explicitly out of scope.
 
 Pre-requisites: provider decision (hosted vs local — $0 constraint),
 output-type validation fix (V1), usage caps, documented data-exposure

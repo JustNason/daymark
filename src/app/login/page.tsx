@@ -1,11 +1,18 @@
 "use client";
+import Image from "next/image";
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { CalendarDays, ArrowRight, LoaderCircle } from "lucide-react";
+import { ArrowRight, LoaderCircle } from "lucide-react";
 
-function DiscordIcon({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
+function DiscordIcon({
+  size = 16,
+  style,
+}: {
+  size?: number;
+  style?: React.CSSProperties;
+}) {
   return (
     <svg
       width={size}
@@ -99,10 +106,24 @@ export default function LoginPage() {
   return (
     <main className="auth-screen">
       <section className="auth-brand">
-        <div className="brand-mark">
-          <CalendarDays size={22} />
-        </div>
-        <span>DAYMARK</span>
+        <Image
+          src="/brand/daymark-logo-dark.svg"
+          alt="Daymark"
+          className="logo-mark logo-dark"
+          width={174}
+          height={42}
+          unoptimized
+          style={{ width: 174, height: "auto" }}
+        />
+        <Image
+          src="/brand/daymark-logo-light.svg"
+          alt="Daymark"
+          className="logo-mark logo-light"
+          width={174}
+          height={42}
+          unoptimized
+          style={{ width: 174, height: "auto" }}
+        />
         <p>
           Make room for
           <br />

@@ -6,8 +6,11 @@ in [`supabase/migrations/`](../../supabase/migrations/) disagree, the
 migrations win and this file is stale — report it.
 
 **Migration inventory (2026-11-19):** `0001_daymark.sql` defines the initial
-schema and `0002_security_hardening.sql` adds the profiles RLS enablement and
-notification RPC grants. It was applied to the disposable `DaymarkTest`
+schema, `0002_security_hardening.sql` adds the profiles RLS enablement and
+notification RPC grants, and `0003_hot_path_indexes.sql` adds four additive
+indexes for push subscription, assignment, subtask, and comment lookups. The
+third migration has not yet been applied or verified against a database. The
+second migration was applied to the disposable `DaymarkTest`
 project (`nctorjcauabycyzdmxxy`) and production Daymark
 (`iytnacmrgfaykxdiurzw`) on 2026-11-19. The rollback-only isolation test
 passed on DaymarkTest. Post-migration production metadata confirms RLS and
@@ -50,23 +53,27 @@ erDiagram
     auth_users ||--o{ ai_scheduling_proposals : "user_id"
 ```
 
-## Tables (21)
+## Tables (24)
 
 All primary keys are UUID; every user-owned table has `user_id` →
 `auth.users(id) ON DELETE CASCADE` (account deletion cascades).
 
-| Group | Tables | Purpose |
-| --- | --- | --- |
-| Account | `profiles`, `user_preferences` | display name; timezone/theme/week-start/workday preferences |
-| Work | `projects`, `tasks`, `subtasks`, `task_comments`, `tags`, `task_tags` | tasks have `status` (backlog/todo/in_progress/in_review/completed enums), `priority`, estimates, `source` (manual/assignment/ai) |
-| Calendar | `calendar_events`, `scheduled_work_sessions` | events with timezone/recurrence fields; approved planner blocks (`status` planned/done/skipped) |
-| Coursework | `courses`, `assignments` | sync flags on courses; assignments carry immutable `original_*` snapshots **and** independent `personal_*` overrides |
-| Integrations | `external_integrations`, `integration_sync_logs` | per `(user_id, provider)` connection state + encrypted token blob + sync history |
-| Notifications | `notification_preferences`, `notifications`, `notification_deliveries`, `push_subscriptions` | channel prefs, in-app history, per-channel delivery queue, web-push endpoints |
-| AI | `ai_conversations`, `ai_messages`, `ai_scheduling_proposals` | **first two are dead schema** (never referenced in `src/`); proposals are written on approve/reject |
+| Group         | Tables                                                                                       | Purpose                                                                                                                          |
+| ------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Account       | `profiles`, `user_preferences`                                                               | display name; timezone/theme/week-start/workday preferences                                                                      |
+| Work          | `projects`, `tasks`, `subtasks`, `task_comments`, `tags`, `task_tags`                        | tasks have `status` (backlog/todo/in_progress/in_review/completed enums), `priority`, estimates, `source` (manual/assignment/ai) |
+| Calendar      | `calendar_events`, `scheduled_work_sessions`                                                 | events with timezone/recurrence fields; approved planner blocks (`status` planned/done/skipped)                                  |
+| Coursework    | `courses`, `assignments`                                                                     | sync flags on courses; assignments carry immutable `original_*` snapshots **and** independent `personal_*` overrides             |
+| Integrations  | `external_integrations`, `integration_sync_logs`                                             | per `(user_id, provider)` connection state + encrypted token blob + sync history                                                 |
+| Notifications | `notification_preferences`, `notifications`, `notification_deliveries`, `push_subscriptions` | channel prefs, in-app history, per-channel delivery queue, web-push endpoints                                                    |
+| AI            | `ai_conversations`, `ai_messages`, `ai_scheduling_proposals`                                 | first two remain unused; proposals are written on approve/reject                                                                 |
 
-Column-level detail is intentionally not duplicated here — read the
-migration (205 lines).
+Migration `0004_schoology_extension_pairing.sql` adds pairing codes, hashed
+extension tokens, and a service-role-only rate-limit table/functions. The
+pre-existing encrypted integration credential field remains in the schema
+for compatibility; extension pairing does not require or rewrite historical
+rows. Column-level detail is intentionally not duplicated here — read the
+migrations.
 
 ## Relationships and integrity design
 
@@ -76,7 +83,7 @@ migration (205 lines).
 - **Composite ownership constraints (migration:142-165):** `UNIQUE(user_id, id)`
   on seven parent tables plus composite FKs such as
   `subtasks(user_id, task_id) → tasks(user_id, id)`. This makes it
-  *impossible to attach a row to another user's parent* even if RLS were
+  _impossible to attach a row to another user's parent_ even if RLS were
   bypassed. Keep this pattern for every new parent/child pair.
 - Notable columns: `scheduled_work_sessions.proposal_id` has **no FK**;
   `push_subscriptions.endpoint` is globally unique; `notifications.dedupe_key`
@@ -86,26 +93,29 @@ migration (205 lines).
 
 ## Indexes (explicit)
 
-| Index | Serves |
-| --- | --- |
-| `tasks(user_id, due_at) WHERE status <> 'completed'` | deadline queries |
-| `tasks(user_id, status, updated_at DESC)` | board/list |
-| `calendar_events(user_id, starts_at, ends_at)` | calendar ranges |
-| `scheduled_work_sessions(user_id, starts_at, ends_at)` | planner ranges |
-| `assignments(user_id, coalesce(personal_due_at, original_due_at))` | assignment due lists |
-| `notifications(user_id, created_at DESC) WHERE read_at IS NULL` | unread badge |
-| `notification_deliveries(status, scheduled_for) WHERE status IN ('queued','retry')` | cron claim |
-| `integration_sync_logs(user_id, started_at DESC)` | sync history |
-
-*Missing indexes identified by audit (recommendation backlog):*
-`push_subscriptions(user_id)` (queried per delivery), `tasks(user_id,
-assignment_id)` (queried per assignment during sync), `subtasks(task_id)`,
-`task_comments(task_id)`.
+| Index                                                                               | Serves                                                 |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `tasks(user_id, due_at) WHERE status <> 'completed'`                                | deadline queries                                       |
+| `tasks(user_id, status, updated_at DESC)`                                           | board/list                                             |
+| `calendar_events(user_id, starts_at, ends_at)`                                      | calendar ranges                                        |
+| `scheduled_work_sessions(user_id, starts_at, ends_at)`                              | planner ranges                                         |
+| `assignments(user_id, coalesce(personal_due_at, original_due_at))`                  | assignment due lists                                   |
+| `notifications(user_id, created_at DESC) WHERE read_at IS NULL`                     | unread badge                                           |
+| `notification_deliveries(status, scheduled_for) WHERE status IN ('queued','retry')` | cron claim                                             |
+| `integration_sync_logs(user_id, started_at DESC)`                                   | sync history                                           |
+| `push_subscriptions(user_id)`                                                       | subscription cleanup/delivery lookups (migration 0003) |
+| `tasks(user_id, assignment_id) WHERE assignment_id IS NOT NULL`                     | assignment-linked task lookups (migration 0003)        |
+| `subtasks(task_id)`                                                                 | task detail checklist lookup (migration 0003)          |
+| `task_comments(task_id)`                                                            | task detail comment lookup (migration 0003)            |
 
 ## RLS and ownership
 
-- RLS is enabled by a `DO` loop over a **20-table list** (migration:196-201)
-  creating policy `owner_all`
+- Base user tables use the owner policies described below; migration 0004
+  enables owner-only RLS on the two extension credential tables. The rate
+  limit table has RLS enabled with no client policies and is accessed only by
+  the service-role RPCs. The rollback-only test checks that browser roles have
+  no direct SELECT/INSERT/UPDATE/DELETE grants on those tables and that
+  `service_role` has each required data privilege.
   (`USING`/`WITH CHECK user_id = (select auth.uid())`), plus policy `profile_owner`
   on `profiles` (migration:202).
 - `0001_daymark.sql` omits `profiles` from its RLS loop. In DaymarkTest,
@@ -133,32 +143,30 @@ assignment_id)` (queried per assignment during sync), `subtasks(task_id)`,
 
 ## Functions and triggers
 
-| Object | Definition | Notes |
-| --- | --- | --- |
+| Object                                      | Definition                                                                                                                                                                                                                         | Notes                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `claim_notification_deliveries(batch_size)` | `SECURITY DEFINER`, `search_path=''`, `FOR UPDATE SKIP LOCKED`, caps batch at 100, sets `processing` + `attempts+1` (migration:176-185); `0002_security_hardening.sql` revokes PUBLIC/anon/authenticated and grants `service_role` | DaymarkTest and production metadata on 2026-11-19 confirmed anon/authenticated/PUBLIC denied and service_role allowed; production owner is `postgres` and `search_path=""`. Worker code uses its service-role client (`src/app/api/cron/notifications/route.ts:139-142`), so its required EXECUTE permission is preserved. A post-migration live delivery was not exercised. |
-| `bootstrap_profile()` trigger | `AFTER INSERT ON auth.users` → creates `profiles`, `user_preferences`, `notification_preferences` (migration:187-194) | the only trigger |
+| `bootstrap_profile()` trigger               | `AFTER INSERT ON auth.users` → creates `profiles`, `user_preferences`, `notification_preferences` (migration:187-194)                                                                                                              | the only trigger                                                                                                                                                                                                                                                                                                                                                             |
 
 No views exist in the schema.
 
 ## Dead or unused schema (verified 2026-11-17)
 
 No code reference exists for: `tags`, `task_tags` (no UI), `ai_conversations`,
-`ai_messages` (no chat surface); stored-but-unread columns: `in_app_enabled`,
-`daily_summary`, `weekly_summary` (worker ignores them), `week_starts_on`
-(UI saves it; all computations hardcode Monday), `tasks.completed_at`,
+`ai_messages` (no chat surface); stored-but-unread columns: `daily_summary`,
+`weekly_summary` (not offered as controls), `tasks.completed_at`,
 `tasks.recurrence`, `calendar_events.recurrence_rule/location/category`,
 `projects.start_date/icon`, `user_preferences.date_format/time_format/
-default_calendar_view`, `assignments.ignored_at`/`personal_completed`
-(read but never settable). These are candidates for wiring up or removing —
+default_calendar_view`, and `assignments.ignored_at` (no ignore/recovery UI).
+`week_starts_on` drives the calendar and `personal_completed` is editable.
+Remaining unused fields are candidates for wiring up or removing —
 see [BACKLOG.md](../product/BACKLOG.md).
 
 ## Secret material
 
-`external_integrations.encrypted_credentials` contains only AES-256-GCM
-ciphertext + nonce/tag envelope; `INTEGRATION_ENCRYPTION_KEY` must be a random
-32-byte key. Rotating it requires a decrypt/re-encrypt migration while the
-old key remains available. Never return this column in app API responses
-(no route currently does — verified).
+`external_integrations.encrypted_credentials` may contain historical
+Schoology AES-256-GCM ciphertext + nonce/tag envelopes. The extension does
+not read or rewrite this legacy column. No route returns it.
 
 ## Ownership
 

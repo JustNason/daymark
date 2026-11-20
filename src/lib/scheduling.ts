@@ -8,6 +8,43 @@ export type WorkItem = {
 export type BusyRange = { start: Date; end: Date };
 export type Slot = { taskId: string; title: string; start: Date; end: Date };
 
+/** Returns the longest workday gap remaining after existing commitments. */
+export function maxFreeWindowMinutes(
+  now: Date,
+  workdayStart: Date,
+  workdayEnd: Date,
+  occupied: Array<{ start: string; end: string }>,
+): number {
+  const start = Math.max(now.getTime(), workdayStart.getTime());
+  const end = workdayEnd.getTime();
+  if (![start, end].every(Number.isFinite) || start >= end) return 0;
+  const blocks = occupied
+    .map((slot) => ({
+      start: Date.parse(slot.start),
+      end: Date.parse(slot.end),
+    }))
+    .filter(
+      (slot) =>
+        Number.isFinite(slot.start) &&
+        Number.isFinite(slot.end) &&
+        slot.end > start &&
+        slot.start < end,
+    )
+    .map((slot) => ({
+      start: Math.max(slot.start, start),
+      end: Math.min(slot.end, end),
+    }))
+    .sort((a, b) => a.start - b.start);
+  let cursor = start;
+  let longest = 0;
+  for (const block of blocks) {
+    longest = Math.max(longest, block.start - cursor);
+    cursor = Math.max(cursor, block.end);
+  }
+  longest = Math.max(longest, end - cursor);
+  return Math.floor(longest / 60_000);
+}
+
 const zonedParts = (date: Date, timezone: string) => {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,

@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -8,21 +9,26 @@ import {
   wallTimeToUtc,
   zonedInputValue,
   zonedMidnight,
-  zonedPartsOf,
   zonedTime,
 } from "@/lib/timezone";
 import { useTheme } from "next-themes";
+import { Modal } from "@/components/Modal";
+import { Toast } from "@/components/Toast";
+import { IconButton } from "@/components/IconButton";
+import { CreateModal, TaskDetailModal } from "@/components/TaskModals";
+import { CalendarView } from "@/components/calendar/CalendarView";
+import { CalendarEventModal } from "@/components/calendar/CalendarEventModal";
+import { Empty } from "@/components/Empty";
 import {
-  format,
-  addDays,
-  addMonths,
-  subMonths,
-  startOfWeek,
-  startOfMonth,
-  eachDayOfInterval,
-  isSameDay,
-  isSameMonth,
-} from "date-fns";
+  AssignmentRow,
+  CoursesView,
+} from "@/components/coursework/CourseworkViews";
+import {
+  DiscordIcon,
+  NotificationPreferences,
+  SettingsView,
+} from "@/components/settings/SettingsView";
+import { format, addDays, startOfWeek, isSameDay } from "date-fns";
 import {
   AlarmClock,
   ArrowRight,
@@ -31,14 +37,11 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Clock3,
   FolderKanban,
   GraduationCap,
   LayoutDashboard,
   ListTodo,
-  LogOut,
   Menu,
   Moon,
   MoreHorizontal,
@@ -52,6 +55,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { maxFreeWindowMinutes } from "@/lib/scheduling";
 
 type Section =
   | "Today"
@@ -108,7 +112,12 @@ type WorkSession = {
   ends_at: string;
   status: "planned" | "done" | "skipped";
 };
-type IntegrationState = { provider: string; status: string; last_synced_at: string | null; last_error: string | null };
+type IntegrationState = {
+  provider: string;
+  status: string;
+  last_synced_at: string | null;
+  last_error: string | null;
+};
 type Assignment = {
   id: string;
   title: string;
@@ -121,10 +130,18 @@ type Assignment = {
   original_completed: boolean | null;
   course_id: string | null;
   url: string | null;
+  ignored_at?: string | null;
 };
 type Proposal = {
   id: string;
-  slots: { id: string; taskId: string; title: string; start: Date; end: Date; selected: boolean }[];
+  slots: {
+    id: string;
+    taskId: string;
+    title: string;
+    start: Date;
+    end: Date;
+    selected: boolean;
+  }[];
   explanation?: string;
 };
 const nav: { title: string; items: Section[] }[] = [
@@ -167,7 +184,12 @@ export default function Workspace() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [workSessions, setWorkSessions] = useState<WorkSession[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<Event[]>([]);
+  const [calendarWorkSessions, setCalendarWorkSessions] = useState<
+    WorkSession[]
+  >([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [showIgnoredAssignments, setShowIgnoredAssignments] = useState(false);
   const [courses, setCourses] = useState<Course[]>([]);
   const [integrations, setIntegrations] = useState<IntegrationState[]>([]);
   const [search, setSearch] = useState("");
@@ -178,17 +200,37 @@ export default function Workspace() {
   const [assignmentCourseFilter, setAssignmentCourseFilter] = useState("");
   const [modal, setModal] = useState<"task" | "event" | "project" | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
+  const [pendingDeletion, setPendingDeletion] = useState<{
+    kind: "task" | "project";
+    id: string;
+  } | null>(null);
   const [toast, setToast] = useState("");
   const [error, setError] = useState("");
   const [date, setDate] = useState(new Date());
-  const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [timezone, setTimezone] = useState(
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  );
+  const [weekStartsOn, setWeekStartsOn] = useState<0 | 1 | 6>(1);
+  const [workdayStart, setWorkdayStart] = useState("09:00");
+  const [workdayEnd, setWorkdayEnd] = useState("17:00");
+  const [displayName, setDisplayName] = useState("");
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [todayExplanation, setTodayExplanation] = useState("");
+  const [todayExplainBusy, setTodayExplainBusy] = useState(false);
+  const [allowExternalTodayExplanation, setAllowExternalTodayExplanation] =
+    useState(false);
   const [planning, setPlanning] = useState(false);
   const [plannerPrompt, setPlannerPrompt] = useState("");
+  const [allowExternalPlanner, setAllowExternalPlanner] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
   const [proposalBusy, setProposalBusy] = useState(false);
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 640px)");
-    const applyNarrowTaskView = () => { if (media.matches) setTaskView((current) => current === "Board" ? "List" : current); };
+    const media = window.matchMedia("(max-width: 760px)");
+    const applyNarrowTaskView = () => {
+      if (media.matches)
+        setTaskView((current) => (current === "Board" ? "List" : current));
+    };
     applyNarrowTaskView();
     media.addEventListener("change", applyNarrowTaskView);
     return () => media.removeEventListener("change", applyNarrowTaskView);
@@ -209,11 +251,7 @@ export default function Workspace() {
         .gte("ends_at", new Date(Date.now() - 86400000).toISOString())
         .lte("starts_at", new Date(Date.now() + 45 * 86400000).toISOString())
         .order("starts_at"),
-      supabase
-        .from("assignments")
-        .select("*")
-        .is("ignored_at", null)
-        .order("original_due_at"),
+      supabase.from("assignments").select("*").order("original_due_at"),
       supabase.from("courses").select("*").order("name"),
       supabase
         .from("notifications")
@@ -226,44 +264,101 @@ export default function Workspace() {
         .gte("ends_at", rangeStart.toISOString())
         .lte("starts_at", rangeEnd.toISOString())
         .order("starts_at"),
-      supabase.from("user_preferences").select("timezone").maybeSingle(),
-      supabase.from("external_integrations").select("provider,status,last_synced_at,last_error").in("provider", ["schoology", "discord"]),
+      supabase
+        .from("user_preferences")
+        .select("timezone,week_starts_on,workday_start,workday_end")
+        .maybeSingle(),
+      supabase
+        .from("external_integrations")
+        .select("provider,status,last_synced_at,last_error")
+        .in("provider", ["schoology", "discord"]),
     ]);
-    if (t.error || p.error || e.error || a.error || c.error || n.error || s.error || pref.error || integrationResult.error)
+    if (
+      t.error ||
+      p.error ||
+      e.error ||
+      a.error ||
+      c.error ||
+      n.error ||
+      s.error ||
+      pref.error ||
+      integrationResult.error
+    )
       setError(
-        (t.error || p.error || e.error || a.error || c.error || n.error || s.error || pref.error || integrationResult.error)
-          ?.message ||
-          "Could not load workspace data",
+        (
+          t.error ||
+          p.error ||
+          e.error ||
+          a.error ||
+          c.error ||
+          n.error ||
+          s.error ||
+          pref.error ||
+          integrationResult.error
+        )?.message || "Could not load workspace data",
       );
+    const { data: notificationPreference } = await supabase
+      .from("notification_preferences")
+      .select("in_app_enabled")
+      .maybeSingle();
     setTasks((t.data || []) as Task[]);
     setProjects((p.data || []) as Project[]);
     setEvents((e.data || []) as Event[]);
     setWorkSessions((s.data || []) as WorkSession[]);
     setAssignments((a.data || []) as Assignment[]);
     setCourses((c.data || []) as Course[]);
-    setUnreadCount(n.count || 0);
+    setUnreadCount(
+      notificationPreference?.in_app_enabled === false ? 0 : n.count || 0,
+    );
     if (pref.data?.timezone) setTimezone(pref.data.timezone);
+    if (pref.data?.workday_start)
+      setWorkdayStart(pref.data.workday_start.slice(0, 5));
+    if (pref.data?.workday_end)
+      setWorkdayEnd(pref.data.workday_end.slice(0, 5));
+    if (
+      pref.data?.week_starts_on === 0 ||
+      pref.data?.week_starts_on === 1 ||
+      pref.data?.week_starts_on === 6
+    )
+      setWeekStartsOn(pref.data.week_starts_on);
     setIntegrations((integrationResult.data || []) as IntegrationState[]);
     setDataLoading(false);
   }, [supabase]);
-  const loadCalendarRange = useCallback(async (from: Date, to: Date) => {
-    if (!supabase) return;
-    const requestId = ++calendarRequest.current;
-    setCalendarLoading(true);
-    const [eventResult, sessionResult] = await Promise.all([
-      supabase.from("calendar_events").select("*").gte("ends_at", from.toISOString()).lt("starts_at", to.toISOString()).order("starts_at"),
-      supabase.from("scheduled_work_sessions").select("id,task_id,starts_at,ends_at,status").eq("status", "planned").gte("ends_at", from.toISOString()).lt("starts_at", to.toISOString()).order("starts_at"),
-    ]);
-    if (requestId !== calendarRequest.current) return;
-    if (eventResult.error || sessionResult.error) {
-      setError((eventResult.error || sessionResult.error)?.message || "Could not load calendar items");
+  const loadCalendarRange = useCallback(
+    async (from: Date, to: Date) => {
+      if (!supabase) return;
+      const requestId = ++calendarRequest.current;
+      setCalendarLoading(true);
+      const [eventResult, sessionResult] = await Promise.all([
+        supabase
+          .from("calendar_events")
+          .select("*")
+          .gte("ends_at", from.toISOString())
+          .lt("starts_at", to.toISOString())
+          .order("starts_at"),
+        supabase
+          .from("scheduled_work_sessions")
+          .select("id,task_id,starts_at,ends_at,status")
+          .eq("status", "planned")
+          .gte("ends_at", from.toISOString())
+          .lt("starts_at", to.toISOString())
+          .order("starts_at"),
+      ]);
+      if (requestId !== calendarRequest.current) return;
+      if (eventResult.error || sessionResult.error) {
+        setError(
+          (eventResult.error || sessionResult.error)?.message ||
+            "Could not load calendar items",
+        );
+        setCalendarLoading(false);
+        return;
+      }
+      setCalendarEvents((eventResult.data || []) as Event[]);
+      setCalendarWorkSessions((sessionResult.data || []) as WorkSession[]);
       setCalendarLoading(false);
-      return;
-    }
-    setEvents((eventResult.data || []) as Event[]);
-    setWorkSessions((sessionResult.data || []) as WorkSession[]);
-    setCalendarLoading(false);
-  }, [supabase]);
+    },
+    [supabase],
+  );
   useEffect(() => {
     if (!mobileNav && !accountMenuOpen) return;
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -303,45 +398,163 @@ export default function Workspace() {
     queueMicrotask(() => {
       if (linkResult) {
         setSection("Notifications");
-        setToast(linkResult === "connected" ? "Discord account linked" : linkResult === "not_configured" ? "Discord account linking needs OAuth credentials in Vercel" : linkResult === "cancelled" ? "Discord account linking was cancelled" : "Could not link Discord account");
+        setToast(
+          linkResult === "connected"
+            ? "Discord account linked"
+            : linkResult === "not_configured"
+              ? "Discord account linking needs OAuth credentials in Vercel"
+              : linkResult === "cancelled"
+                ? "Discord account linking was cancelled"
+                : "Could not link Discord account",
+        );
         router.replace("/app");
-      } else if (["Today", "Calendar", "Tasks", "Projects", "Courses", "Assignments", "AI Planner", "Notifications", "Settings"].includes(normalized || "")) {
+      } else if (
+        [
+          "Today",
+          "Calendar",
+          "Tasks",
+          "Projects",
+          "Courses",
+          "Assignments",
+          "AI Planner",
+          "Notifications",
+          "Settings",
+        ].includes(normalized || "")
+      ) {
         setSection(normalized as Section);
       }
     });
   }, [router]);
+  const changeSection = useCallback(
+    (next: Section, history: "push" | "replace" = "push") => {
+      setSection(next);
+      const href = `/app?section=${encodeURIComponent(next)}`;
+      if (history === "replace") router.replace(href, { scroll: false });
+      else router.push(href, { scroll: false });
+    },
+    [router],
+  );
+  useEffect(() => {
+    const onPopState = () => {
+      const requested = new URLSearchParams(window.location.search).get(
+        "section",
+      );
+      const normalized = requested === "My Tasks" ? "Tasks" : requested;
+      setSection(
+        [
+          "Today",
+          "Calendar",
+          "Tasks",
+          "Projects",
+          "Courses",
+          "Assignments",
+          "AI Planner",
+          "Notifications",
+          "Settings",
+        ].includes(normalized || "")
+          ? (normalized as Section)
+          : "Today",
+      );
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInput.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, []);
   async function createTask(title: string, extra: Partial<Task> = {}) {
-    if (!supabase) return;
+    if (!supabase) return false;
     const {
       data: { user: u },
     } = await supabase.auth.getUser();
-    if (!u) return;
+    if (!u) return false;
     const { error } = await supabase
       .from("tasks")
       .insert({ user_id: u.id, title, ...extra });
     if (error) {
       setError(error.message);
-      return;
+      return false;
     }
     setToast("Task added");
     await reload();
+    return true;
   }
   async function updateTask(id: string, patch: Partial<Task>) {
-    if (!supabase) return;
+    if (!supabase) return false;
     const { error } = await supabase
       .from("tasks")
       .update({ ...patch, updated_at: new Date().toISOString() })
       .eq("id", id);
-    if (error) setError(error.message);
-    else {
+    if (error) {
+      setError(error.message);
+      return false;
+    } else {
       setTasks((cur) => cur.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+      return true;
     }
   }
-  async function removeTask(id: string) {
+  async function updateWorkSessionStatus(
+    id: string,
+    status: "done" | "skipped",
+  ) {
     if (!supabase) return;
+    const { error: updateError } = await supabase
+      .from("scheduled_work_sessions")
+      .update({ status })
+      .eq("id", id);
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+    setToast(
+      status === "done" ? "Work session completed" : "Work session skipped",
+    );
+    await reload();
+    const start = startOfWeek(date, { weekStartsOn });
+    await loadCalendarRange(
+      zonedMidnight(start, timezone),
+      zonedMidnight(addDays(start, 7), timezone),
+    );
+  }
+  async function removeTask(id: string) {
+    if (!supabase) return false;
     const { error } = await supabase.from("tasks").delete().eq("id", id);
-    if (error) setError(error.message);
-    else setTasks((v) => v.filter((t) => t.id !== id));
+    if (error) {
+      setError(error.message);
+      return false;
+    }
+    setTasks((v) => v.filter((t) => t.id !== id));
+    return true;
+  }
+  async function confirmDeletion() {
+    if (!pendingDeletion || !supabase) return;
+    if (pendingDeletion.kind === "task") {
+      const removed = await removeTask(pendingDeletion.id);
+      if (removed) {
+        setEditingTask(null);
+        setToast("Task deleted");
+      }
+    } else {
+      const { error } = await supabase
+        .from("projects")
+        .delete()
+        .eq("id", pendingDeletion.id);
+      if (error) setError(error.message);
+      else {
+        setProjects((items) =>
+          items.filter((item) => item.id !== pendingDeletion.id),
+        );
+        setToast("Project removed");
+      }
+    }
+    setPendingDeletion(null);
   }
   async function importAssignment(a: Assignment) {
     if (!supabase) return;
@@ -378,7 +591,9 @@ export default function Workspace() {
   async function toggleTheme() {
     const nextTheme = resolvedTheme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
-    window.dispatchEvent(new CustomEvent("daymark-theme", { detail: nextTheme }));
+    window.dispatchEvent(
+      new CustomEvent("daymark-theme", { detail: nextTheme }),
+    );
     localStorage.setItem("theme", nextTheme);
     if (!supabase || !user) return;
     const { error } = await supabase
@@ -386,7 +601,9 @@ export default function Workspace() {
       .update({ theme: nextTheme, updated_at: new Date().toISOString() })
       .eq("user_id", user.id);
     if (error)
-      setError(`Theme changed for this session but could not be saved: ${error.message}`);
+      setError(
+        `Theme changed for this session but could not be saved: ${error.message}`,
+      );
   }
   async function generatePlan() {
     setPlanning(true);
@@ -395,7 +612,10 @@ export default function Workspace() {
       const response = await fetch("/api/ai/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: plannerPrompt }),
+        body: JSON.stringify({
+          prompt: plannerPrompt,
+          allowExternalProvider: allowExternalPlanner,
+        }),
       });
       const data = await response.json();
       if (!response.ok)
@@ -408,7 +628,13 @@ export default function Workspace() {
             title: string;
             start: string;
             end: string;
-          }) => ({ ...s, id: crypto.randomUUID(), selected: true, start: new Date(s.start), end: new Date(s.end) }),
+          }) => ({
+            ...s,
+            id: crypto.randomUUID(),
+            selected: true,
+            start: new Date(s.start),
+            end: new Date(s.end),
+          }),
         ),
         explanation: data.explanation,
       });
@@ -420,7 +646,22 @@ export default function Workspace() {
   }
   const filtered = useMemo(
     () =>
-      tasks.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()) && (!taskProjectFilter || t.project_id === taskProjectFilter) && (!taskStatusFilter || t.status === taskStatusFilter)).sort((a,b) => taskSort === "title" ? a.title.localeCompare(b.title) : taskSort === "priority" ? ["urgent","high","medium","low"].indexOf(a.priority) - ["urgent","high","medium","low"].indexOf(b.priority) : (a.due_at ? +new Date(a.due_at) : Infinity) - (b.due_at ? +new Date(b.due_at) : Infinity)),
+      tasks
+        .filter(
+          (t) =>
+            t.title.toLowerCase().includes(search.toLowerCase()) &&
+            (!taskProjectFilter || t.project_id === taskProjectFilter) &&
+            (!taskStatusFilter || t.status === taskStatusFilter),
+        )
+        .sort((a, b) =>
+          taskSort === "title"
+            ? a.title.localeCompare(b.title)
+            : taskSort === "priority"
+              ? ["urgent", "high", "medium", "low"].indexOf(a.priority) -
+                ["urgent", "high", "medium", "low"].indexOf(b.priority)
+              : (a.due_at ? +new Date(a.due_at) : Infinity) -
+                (b.due_at ? +new Date(b.due_at) : Infinity),
+        ),
     [tasks, search, taskProjectFilter, taskStatusFilter, taskSort],
   );
   const todayTasks = tasks.filter(
@@ -429,28 +670,145 @@ export default function Workspace() {
       t.due_at &&
       sameZonedDay(t.due_at!, new Date(), timezone),
   );
+  const overdueTasks = tasks.filter(
+    (t) =>
+      t.status !== "completed" &&
+      t.due_at &&
+      new Date(t.due_at) < new Date() &&
+      !sameZonedDay(t.due_at, new Date(), timezone),
+  );
+  const todayEvents = events.filter((event) =>
+    sameZonedDay(event.starts_at, new Date(), timezone),
+  );
+  const todaySessions = workSessions.filter((session) =>
+    sameZonedDay(session.starts_at, new Date(), timezone),
+  );
+  const today = dateInTimezone(new Date(), timezone);
+  const workdayStartAt = wallTimeToUtc(`${today}T${workdayStart}`, timezone);
+  const workdayEndAt = wallTimeToUtc(`${today}T${workdayEnd}`, timezone);
+  const maxFreeMinutesToday = maxFreeWindowMinutes(
+    new Date(),
+    workdayStartAt,
+    workdayEndAt,
+    [
+      ...todayEvents.map((event) => ({
+        start: event.starts_at,
+        end: event.ends_at,
+      })),
+      ...todaySessions.map((session) => ({
+        start: session.starts_at,
+        end: session.ends_at,
+      })),
+    ],
+  );
+  const incompleteTasks = tasks.filter((task) => task.status !== "completed");
+  const fittingTasks = incompleteTasks.filter(
+    (task) => (task.estimated_minutes || 60) <= maxFreeMinutesToday,
+  );
+  const suggestedTaskFitsAvailableTime = fittingTasks.length > 0;
+  const suggestedNextTask = (
+    fittingTasks.length ? fittingTasks : incompleteTasks
+  ).sort((a, b) => {
+    const overdueA =
+      a.due_at &&
+      new Date(a.due_at) < new Date() &&
+      !sameZonedDay(a.due_at, new Date(), timezone);
+    const overdueB =
+      b.due_at &&
+      new Date(b.due_at) < new Date() &&
+      !sameZonedDay(b.due_at, new Date(), timezone);
+    if (Boolean(overdueA) !== Boolean(overdueB)) return overdueA ? -1 : 1;
+    if (a.due_at && b.due_at && +new Date(a.due_at) !== +new Date(b.due_at))
+      return +new Date(a.due_at) - +new Date(b.due_at);
+    if (a.due_at !== b.due_at) return a.due_at ? -1 : 1;
+    return (
+      ["urgent", "high", "medium", "low"].indexOf(a.priority) -
+      ["urgent", "high", "medium", "low"].indexOf(b.priority)
+    );
+  })[0];
   const upcoming = tasks
     .filter(
       (t) =>
         t.status !== "completed" &&
         t.due_at &&
-        new Date(t.due_at) >= new Date(),
+        !sameZonedDay(t.due_at, new Date(), timezone),
     )
+    .sort((a, b) => +new Date(a.due_at!) - +new Date(b.due_at!))
     .slice(0, 5);
   const done = tasks.filter((t) => t.status === "completed").length;
   const taskContext = (task: Task) => {
-    const projectName = projects.find((project) => project.id === task.project_id)?.name;
-    const assignment = assignments.find((item) => item.id === task.assignment_id);
-    const courseName = courses.find((course) => course.id === assignment?.course_id)?.name;
+    const projectName = projects.find(
+      (project) => project.id === task.project_id,
+    )?.name;
+    const assignment = assignments.find(
+      (item) => item.id === task.assignment_id,
+    );
+    const courseName = courses.find(
+      (course) => course.id === assignment?.course_id,
+    )?.name;
     return [projectName, courseName].filter(Boolean).join(" · ");
   };
-  const zonedToday = new Date(`${dateInTimezone(new Date(), timezone)}T12:00:00`);
-  const weekStartDate = startOfWeek(zonedToday, { weekStartsOn: 1 });
+  const zonedToday = new Date(
+    `${dateInTimezone(new Date(), timezone)}T12:00:00`,
+  );
+  const weekStartDate = startOfWeek(zonedToday, { weekStartsOn });
   const weekStart = zonedMidnight(weekStartDate, timezone);
   const weekEnd = zonedMidnight(addDays(weekStartDate, 7), timezone);
-  const todayEvents = events.filter((e) => sameZonedDay(e.starts_at, new Date(), timezone));
-  const todaySessions = workSessions.filter((s) => sameZonedDay(s.starts_at, new Date(), timezone));
   const scheduledToday = todayEvents.length + todaySessions.length;
+  async function explainTodayPlan() {
+    setTodayExplainBusy(true);
+    setTodayExplanation("");
+    try {
+      const slots = [
+        ...todayEvents.map((event) => ({
+          title: event.title,
+          start: event.starts_at,
+          end: event.ends_at,
+        })),
+        ...todaySessions.map((session) => ({
+          title:
+            tasks.find((task) => task.id === session.task_id)?.title ||
+            "Planned work",
+          start: session.starts_at,
+          end: session.ends_at,
+        })),
+      ].sort((a, b) => +new Date(a.start) - +new Date(b.start));
+      const response = await fetch("/api/ai/context", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          feature: "explain",
+          input: {
+            slots,
+            tasks: [...overdueTasks, ...todayTasks].map((task) => ({
+              title: task.title,
+              dueAt: task.due_at,
+              priority: task.priority,
+            })),
+            allowExternalProvider: allowExternalTodayExplanation,
+          },
+        }),
+      });
+      const result = (await response.json()) as {
+        suggestion?: { text?: string };
+        error?: string;
+        provider?: string;
+      };
+      if (!response.ok || !result.suggestion?.text)
+        throw new Error(result.error || "Could not explain today’s schedule");
+      setTodayExplanation(
+        `${result.suggestion.text}${result.provider === "deterministic" ? " (Daymark’s local rules)" : " (AI-assisted)"}`,
+      );
+    } catch (failure) {
+      setTodayExplanation(
+        failure instanceof Error
+          ? failure.message
+          : "Could not explain today’s schedule",
+      );
+    } finally {
+      setTodayExplainBusy(false);
+    }
+  }
   if (!ready)
     return (
       <div className="loading">
@@ -498,17 +856,37 @@ export default function Workspace() {
       <aside className={`sidebar ${mobileNav ? "mobile-open" : ""}`}>
         <div className="sidebar-brand">
           <div className="brand-mark small">
-            <img src="/daymark-icon.svg" alt="" className="logo-mark logo-dark" />
-            <img src="/daymark-icon-light.svg" alt="" className="logo-mark logo-light" />
+            <Image
+              src="/daymark-icon.svg"
+              alt=""
+              className="logo-mark logo-dark"
+              width={22}
+              height={22}
+              unoptimized
+            />
+            <Image
+              src="/daymark-icon-light.svg"
+              alt=""
+              className="logo-mark logo-light"
+              width={22}
+              height={22}
+              unoptimized
+            />
           </div>
           <b>daymark</b>
           <button
             className="icon-button sidebar-collapse"
-            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={
+              sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+            }
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             onClick={() => setSidebarCollapsed((v) => !v)}
           >
-            {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+            {sidebarCollapsed ? (
+              <PanelLeftOpen size={17} />
+            ) : (
+              <PanelLeftClose size={17} />
+            )}
           </button>
           <button
             className="icon-button hide-desktop mobile-nav-close"
@@ -518,8 +896,14 @@ export default function Workspace() {
             <X size={18} />
           </button>
         </div>
-        <div className="workspace-pill" role="group" aria-label="Current workspace">
-          <div className="workspace-avatar"><CalendarDays size={15} /></div>
+        <div
+          className="workspace-pill"
+          role="group"
+          aria-label="Current workspace"
+        >
+          <div className="workspace-avatar">
+            <CalendarDays size={15} />
+          </div>
           <span>
             <b>Personal workspace</b>
           </span>
@@ -542,7 +926,7 @@ export default function Workspace() {
                         : item
                     }
                     onClick={() => {
-                      setSection(item);
+                      changeSection(item);
                       setMobileNav(false);
                     }}
                     className={`nav-item ${section === item ? "active" : ""}`}
@@ -563,7 +947,15 @@ export default function Workspace() {
         <div className="sidebar-bottom">
           <div className="storage-label">
             <span>Planned this week</span>
-            <span>{workSessions.filter((s) => new Date(s.starts_at) >= weekStart && new Date(s.starts_at) < weekEnd).length}</span>
+            <span>
+              {
+                workSessions.filter(
+                  (s) =>
+                    new Date(s.starts_at) >= weekStart &&
+                    new Date(s.starts_at) < weekEnd,
+                ).length
+              }
+            </span>
           </div>
           <div className="progress-track">
             <i
@@ -575,7 +967,11 @@ export default function Workspace() {
           <div
             className="account-menu-wrap"
             onBlur={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+              if (
+                !event.currentTarget.contains(
+                  event.relatedTarget as Node | null,
+                )
+              )
                 setAccountMenuOpen(false);
             }}
           >
@@ -592,7 +988,7 @@ export default function Workspace() {
               </div>
               <span>
                 <b>{user?.email?.split("@")[0] || "My account"}</b>
-                <small>{user?.email}</small>
+                <small>{displayName || user?.email}</small>
               </span>
               <MoreHorizontal size={16} />
             </button>
@@ -601,13 +997,17 @@ export default function Workspace() {
                 <button
                   type="button"
                   onClick={() => {
-                    setSection("Settings");
+                    changeSection("Settings");
                     setAccountMenuOpen(false);
                   }}
                 >
                   Account and settings
                 </button>
-                <button type="button" className="sign-out-action" onClick={signOut}>
+                <button
+                  type="button"
+                  className="sign-out-action"
+                  onClick={signOut}
+                >
                   Sign out
                 </button>
               </div>
@@ -645,10 +1045,14 @@ export default function Workspace() {
             <label className="searchbox">
               <Search size={15} />
               <input
+                ref={searchInput}
                 aria-label="Search tasks"
-                placeholder="Search tasks…"
+                placeholder="Search tasks… (⌘K)"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  if (section !== "Tasks") changeSection("Tasks", "replace");
+                }}
               />
             </label>
             <button
@@ -660,22 +1064,34 @@ export default function Workspace() {
             <button
               className="icon-button"
               aria-label="Notifications"
-              onClick={() => setSection("Notifications")}
+              onClick={() => changeSection("Notifications")}
             >
               <Bell size={17} />
             </button>
             <button
               className="icon-button theme-toggle"
-              aria-label={resolvedTheme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-              title={resolvedTheme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+              aria-label={
+                resolvedTheme === "dark"
+                  ? "Switch to light theme"
+                  : "Switch to dark theme"
+              }
+              title={
+                resolvedTheme === "dark"
+                  ? "Switch to light theme"
+                  : "Switch to dark theme"
+              }
               onClick={toggleTheme}
             >
-              {resolvedTheme === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+              {resolvedTheme === "dark" ? (
+                <Sun size={17} />
+              ) : (
+                <Moon size={17} />
+              )}
             </button>
             <button
               className="user-avatar top-avatar"
               aria-label="Account settings"
-              onClick={() => setSection("Settings")}
+              onClick={() => changeSection("Settings")}
             >
               {user?.email?.[0]?.toUpperCase() || "D"}
             </button>
@@ -690,15 +1106,12 @@ export default function Workspace() {
               </button>
             </div>
           )}
-          {dataLoading && <div className="notice neutral page-notice">Loading your workspace data…</div>}
-          {toast && (
-            <div className="toast">
-              {toast}
-              <button onClick={() => setToast("")}>
-                <X size={13} />
-              </button>
+          {dataLoading && (
+            <div className="notice neutral page-notice">
+              Loading your workspace data…
             </div>
           )}
+          {toast && <Toast message={toast} onDismiss={() => setToast("")} />}
           {section === "Today" && (
             <>
               <div className="page-heading">
@@ -717,12 +1130,18 @@ export default function Workspace() {
                 </div>
                 <button
                   className="button subtle"
-                  onClick={() => setSection("Calendar")}
+                  onClick={() => changeSection("Calendar")}
                 >
                   <CalendarDays size={15} /> Open calendar
                 </button>
               </div>
               <div className="metric-row">
+                <Metric
+                  label="Overdue"
+                  value={String(overdueTasks.length).padStart(2, "0")}
+                  detail="past-due tasks"
+                  icon={AlarmClock}
+                />
                 <Metric
                   label="Due today"
                   value={String(todayTasks.length).padStart(2, "0")}
@@ -750,14 +1169,80 @@ export default function Workspace() {
                   icon={FolderKanban}
                 />
               </div>
+              {suggestedNextTask && (
+                <section className="panel suggested-next-panel">
+                  <div>
+                    <div className="eyebrow">A GOOD NEXT STEP</div>
+                    <h2>{suggestedNextTask.title}</h2>
+                    <p>
+                      {suggestedNextTask.due_at &&
+                      new Date(suggestedNextTask.due_at) < new Date() &&
+                      !sameZonedDay(
+                        suggestedNextTask.due_at,
+                        new Date(),
+                        timezone,
+                      )
+                        ? "This task is overdue, so it is first in your list."
+                        : suggestedNextTask.due_at &&
+                            sameZonedDay(
+                              suggestedNextTask.due_at,
+                              new Date(),
+                              timezone,
+                            )
+                          ? "This task is due today."
+                          : suggestedNextTask.due_at
+                            ? `It is your next upcoming deadline, ${format(new Date(suggestedNextTask.due_at), "MMM d")}.`
+                            : `It is your highest-priority task without an earlier deadline.`}
+                      {suggestedTaskFitsAvailableTime
+                        ? ` It fits the largest open work block today (${maxFreeMinutesToday} minutes).`
+                        : ` The largest open block today is ${maxFreeMinutesToday} minutes; this task’s estimated duration is ${suggestedNextTask.estimated_minutes || 60} minutes, so consider a shorter task or another time.`}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="button subtle small-button"
+                    onClick={() => setEditingTask(suggestedNextTask)}
+                  >
+                    Open task
+                  </button>
+                </section>
+              )}
               <div className="dashboard-grid">
                 <section className="panel schedule-panel">
                   <PanelTitle
                     title="Today’s schedule"
                     action="View calendar"
-                    onClick={() => setSection("Calendar")}
+                    onClick={() => changeSection("Calendar")}
                   />
-                  {todayEvents.length === 0 && todayTasks.length === 0 && todaySessions.length === 0 ? (
+                  <div className="schedule-explanation-control">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={allowExternalTodayExplanation}
+                        onChange={(event) =>
+                          setAllowExternalTodayExplanation(event.target.checked)
+                        }
+                      />
+                      Share today’s task titles, priorities, and schedule with
+                      the configured AI provider
+                    </label>
+                    <button
+                      type="button"
+                      className="text-button"
+                      disabled={todayExplainBusy}
+                      onClick={() => void explainTodayPlan()}
+                    >
+                      {todayExplainBusy ? "Explaining…" : "Why this plan?"}
+                    </button>
+                  </div>
+                  {todayExplanation && (
+                    <p className="muted" role="status">
+                      {todayExplanation}
+                    </p>
+                  )}
+                  {todayEvents.length === 0 &&
+                  todayTasks.length === 0 &&
+                  todaySessions.length === 0 ? (
                     <Empty
                       compact
                       icon={Clock3}
@@ -767,9 +1252,26 @@ export default function Workspace() {
                   ) : (
                     <div className="timeline">
                       {[
-                        ...todayEvents.map((e) => ({ title: e.title, time: e.starts_at, color: e.color, type: "Calendar event" })),
-                        ...todaySessions.map((s) => ({ title: tasks.find((t) => t.id === s.task_id)?.title || "Planned work", time: s.starts_at, color: "var(--accent)", type: "Work session" })),
-                        ...todayTasks.map((t) => ({ title: t.title, time: t.due_at!, color: "var(--warning)", type: "Task deadline" })),
+                        ...todayEvents.map((e) => ({
+                          title: e.title,
+                          time: e.starts_at,
+                          color: e.color,
+                          type: "Calendar event",
+                        })),
+                        ...todaySessions.map((s) => ({
+                          title:
+                            tasks.find((t) => t.id === s.task_id)?.title ||
+                            "Planned work",
+                          time: s.starts_at,
+                          color: "var(--accent)",
+                          type: "Work session",
+                        })),
+                        ...todayTasks.map((t) => ({
+                          title: t.title,
+                          time: t.due_at!,
+                          color: "var(--warning)",
+                          type: "Task deadline",
+                        })),
                       ]
                         .sort((a, b) => +new Date(a.time) - +new Date(b.time))
                         .map((item, i) => (
@@ -783,9 +1285,7 @@ export default function Workspace() {
                             </div>
                             <div>
                               <b>{item.title}</b>
-                              <small>
-                                {item.type}
-                              </small>
+                              <small>{item.type}</small>
                             </div>
                           </div>
                         ))}
@@ -800,9 +1300,9 @@ export default function Workspace() {
                 </section>
                 <section className="panel upcoming-panel">
                   <PanelTitle
-                    title="Upcoming deadlines"
+                    title="Overdue & upcoming"
                     action="All tasks"
-                    onClick={() => setSection("Tasks")}
+                    onClick={() => changeSection("Tasks")}
                   />
                   {upcoming.length === 0 ? (
                     <Empty
@@ -817,7 +1317,7 @@ export default function Workspace() {
                         <button
                           className="deadline-row"
                           key={t.id}
-                          onClick={() => setSection("Tasks")}
+                          onClick={() => setEditingTask(t)}
                         >
                           <span className={`priority-mark ${t.priority}`} />
                           <span className="deadline-copy">
@@ -827,7 +1327,12 @@ export default function Workspace() {
                                 ?.name || "Personal"}
                             </small>
                           </span>
-                          <time>{format(new Date(t.due_at!), "MMM d")}</time>
+                          <time>
+                            {new Date(t.due_at!) < new Date()
+                              ? "Overdue · "
+                              : ""}
+                            {format(new Date(t.due_at!), "MMM d")}
+                          </time>
                           <ArrowRight size={14} />
                         </button>
                       ))}
@@ -838,12 +1343,12 @@ export default function Workspace() {
                   <PanelTitle
                     title="This week"
                     action="Plan week"
-                    onClick={() => setSection("AI Planner")}
+                    onClick={() => changeSection("AI Planner")}
                   />
                   <div className="week-chart">
                     {Array.from({ length: 7 }, (_, i) => {
                       const d = addDays(
-                        startOfWeek(new Date(), { weekStartsOn: 1 }),
+                        startOfWeek(new Date(), { weekStartsOn }),
                         i,
                       );
                       const count =
@@ -898,7 +1403,7 @@ export default function Workspace() {
                     <QuickAction
                       icon={Sparkles}
                       title="Plan my week"
-                      onClick={() => setSection("AI Planner")}
+                      onClick={() => changeSection("AI Planner")}
                     />
                   </div>
                 </section>
@@ -914,14 +1419,57 @@ export default function Workspace() {
                   <p>{filtered.length} tasks across your workspace</p>
                 </div>
                 <div className="heading-actions">
-                  <select aria-label="Filter tasks by project" value={taskProjectFilter} onChange={(event) => setTaskProjectFilter(event.target.value)}>
+                  <select
+                    aria-label="Filter tasks by project"
+                    value={taskProjectFilter}
+                    onChange={(event) =>
+                      setTaskProjectFilter(event.target.value)
+                    }
+                  >
                     <option value="">All projects</option>
-                    {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
                   </select>
-                  <select aria-label="Filter tasks by status" value={taskStatusFilter} onChange={(event) => setTaskStatusFilter(event.target.value)}><option value="">All statuses</option>{statuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select>
-                  <select aria-label="Sort tasks" value={taskSort} onChange={(event) => setTaskSort(event.target.value as typeof taskSort)}><option value="due">Due date</option><option value="priority">Priority</option><option value="title">Title</option></select>
+                  <select
+                    aria-label="Filter tasks by status"
+                    value={taskStatusFilter}
+                    onChange={(event) =>
+                      setTaskStatusFilter(event.target.value)
+                    }
+                  >
+                    <option value="">All statuses</option>
+                    {statuses.map((status) => (
+                      <option key={status} value={status}>
+                        {label(status)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Sort tasks"
+                    value={taskSort}
+                    onChange={(event) =>
+                      setTaskSort(event.target.value as typeof taskSort)
+                    }
+                  >
+                    <option value="due">Due date</option>
+                    <option value="priority">Priority</option>
+                    <option value="title">Title</option>
+                  </select>
                   <div className="view-switch" aria-label="Task view">
-                    {(["Board", "List"] as const).map((view) => <button key={view} type="button" className={taskView === view ? "selected" : ""} aria-pressed={taskView === view} onClick={() => setTaskView(view)}>{view}</button>)}
+                    {(["Board", "List"] as const).map((view) => (
+                      <button
+                        key={view}
+                        type="button"
+                        className={taskView === view ? "selected" : ""}
+                        aria-pressed={taskView === view}
+                        onClick={() => setTaskView(view)}
+                      >
+                        {view}
+                      </button>
+                    ))}
                   </div>
                   <button
                     className="button primary"
@@ -931,70 +1479,134 @@ export default function Workspace() {
                   </button>
                 </div>
               </div>
-              {taskView === "Board" ? <div className="task-board">
-                {statuses.map((status) => (
-                  <div
-                    className="task-column"
-                    key={status}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      const id = e.dataTransfer.getData("task");
-                      if (id) updateTask(id, { status });
-                    }}
-                  >
-                    <div className="column-title">
-                      <span className={`status-dot ${status}`} />
-                      <b>{label(status)}</b>
-                      <span className="count-pill">
-                        {filtered.filter((t) => t.status === status).length}
-                      </span>
+              {taskView === "Board" ? (
+                <div className="task-board">
+                  {statuses.map((status) => (
+                    <div
+                      className="task-column"
+                      key={status}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        const id = e.dataTransfer.getData("task");
+                        if (id) updateTask(id, { status });
+                      }}
+                    >
+                      <div className="column-title">
+                        <span className={`status-dot ${status}`} />
+                        <b>{label(status)}</b>
+                        <span className="count-pill">
+                          {filtered.filter((t) => t.status === status).length}
+                        </span>
+                        <button
+                          className="icon-button mini"
+                          onClick={() => setModal("task")}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                      {filtered
+                        .filter((t) => t.status === status)
+                        .map((t) => (
+                          <TaskCard
+                            key={t.id}
+                            task={t}
+                            onEdit={() => setEditingTask(t)}
+                            project={taskContext(t)}
+                            onComplete={() =>
+                              updateTask(t.id, {
+                                status:
+                                  t.status === "completed"
+                                    ? "todo"
+                                    : "completed",
+                              })
+                            }
+                            onDelete={() =>
+                              setPendingDeletion({ kind: "task", id: t.id })
+                            }
+                            draggable
+                            onDragStart={(e) =>
+                              e.dataTransfer.setData("task", t.id)
+                            }
+                          />
+                        ))}
                       <button
-                        className="icon-button mini"
+                        className="column-add"
                         onClick={() => setModal("task")}
                       >
-                        <Plus size={14} />
+                        <Plus size={14} /> Add task
                       </button>
                     </div>
-                    {filtered
-                      .filter((t) => t.status === status)
-                      .map((t) => (
-                        <TaskCard
-                          key={t.id}
-                          task={t}
-                          onEdit={() => setEditingTask(t)}
-                          project={taskContext(t)}
-                          onComplete={() =>
-                            updateTask(t.id, {
+                  ))}
+                </div>
+              ) : (
+                <div className="panel task-list-view">
+                  {filtered.length === 0 ? (
+                    <Empty
+                      icon={ListTodo}
+                      title="No tasks match"
+                      text="Add a task or adjust your search."
+                    />
+                  ) : (
+                    filtered.map((task) => (
+                      <div className="task-list-row" key={task.id}>
+                        <button
+                          className={`status-dot ${task.status}`}
+                          aria-label={
+                            task.status === "completed"
+                              ? `Reopen ${task.title}`
+                              : `Mark ${task.title} complete`
+                          }
+                          onClick={() =>
+                            updateTask(task.id, {
                               status:
-                                t.status === "completed" ? "todo" : "completed",
+                                task.status === "completed"
+                                  ? "todo"
+                                  : "completed",
                             })
                           }
-                          onDelete={() => removeTask(t.id)}
-                          draggable
-                          onDragStart={(e) =>
-                            e.dataTransfer.setData("task", t.id)
-                          }
                         />
-                      ))}
-                    <button
-                      className="column-add"
-                      onClick={() => setModal("task")}
-                    >
-                      <Plus size={14} /> Add task
-                    </button>
-                  </div>
-                ))}
-              </div> : <div className="panel task-list-view">
-                {filtered.length === 0 ? <Empty icon={ListTodo} title="No tasks match" text="Add a task or adjust your search." /> : filtered.map((task) => <div className="task-list-row" key={task.id}>
-                  <button className={`status-dot ${task.status}`} aria-label={task.status === "completed" ? `Reopen ${task.title}` : `Mark ${task.title} complete`} onClick={() => updateTask(task.id, { status: task.status === "completed" ? "todo" : "completed" })} />
-                  <button className="task-list-title" onClick={() => setEditingTask(task)}>{task.title}</button>
-                  <span className={`priority ${task.priority}`}>{label(task.priority)}</span>
-                  <span className="task-context-cell">{taskContext(task) || "—"}</span>
-                  <span>{task.due_at ? format(new Date(task.due_at), "MMM d") : "No deadline"}</span>
-                  <select aria-label={`Status for ${task.title}`} value={task.status} onChange={(event) => updateTask(task.id, { status: event.target.value })}>{statuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</select>
-                  <button className="icon-button mini" onClick={() => removeTask(task.id)} aria-label={`Delete ${task.title}`}><Trash2 size={14} /></button>
-                </div>)}
-              </div>}
+                        <button
+                          className="task-list-title"
+                          onClick={() => setEditingTask(task)}
+                        >
+                          {task.title}
+                        </button>
+                        <span className={`priority ${task.priority}`}>
+                          {label(task.priority)}
+                        </span>
+                        <span className="task-context-cell">
+                          {taskContext(task) || "—"}
+                        </span>
+                        <span>
+                          {task.due_at
+                            ? format(new Date(task.due_at), "MMM d")
+                            : "No deadline"}
+                        </span>
+                        <select
+                          aria-label={`Status for ${task.title}`}
+                          value={task.status}
+                          onChange={(event) =>
+                            updateTask(task.id, { status: event.target.value })
+                          }
+                        >
+                          {statuses.map((status) => (
+                            <option key={status} value={status}>
+                              {label(status)}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="icon-button mini"
+                          onClick={() => removeTask(task.id)}
+                          aria-label={`Delete ${task.title}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </>
           )}
           {section === "Projects" && (
@@ -1027,8 +1639,14 @@ export default function Workspace() {
                     const completed = related.filter(
                       (t) => t.status === "completed",
                     ).length;
-                    const upcomingMilestones = related.filter((t) => t.due_at && t.status !== "completed").sort((a,b) => +new Date(a.due_at!) - +new Date(b.due_at!));
-                    const overdueMilestones = upcomingMilestones.filter((t) => new Date(t.due_at!) < new Date());
+                    const upcomingMilestones = related
+                      .filter((t) => t.due_at && t.status !== "completed")
+                      .sort(
+                        (a, b) => +new Date(a.due_at!) - +new Date(b.due_at!),
+                      );
+                    const overdueMilestones = upcomingMilestones.filter(
+                      (t) => new Date(t.due_at!) < new Date(),
+                    );
                     return (
                       <article className="project-card" key={p.id}>
                         <div className="project-card-top">
@@ -1041,16 +1659,7 @@ export default function Workspace() {
                           <button
                             className="icon-button mini"
                             onClick={async () => {
-                              const result = await supabase
-                                ?.from("projects")
-                                .delete()
-                                .eq("id", p.id);
-                              if (!result?.error) {
-                                setProjects((v) =>
-                                  v.filter((x) => x.id !== p.id),
-                                );
-                                setToast("Project removed");
-                              }
+                              setPendingDeletion({ kind: "project", id: p.id });
                             }}
                           >
                             <Trash2 size={14} />
@@ -1078,7 +1687,10 @@ export default function Workspace() {
                           />
                         </div>
                         <div className="project-card-foot">
-                          <span>{p.status} · {completed}/{related.length} tasks complete</span>
+                          <span>
+                            {p.status} · {completed}/{related.length} tasks
+                            complete
+                          </span>
                           {p.target_date && (
                             <span>
                               Target {format(new Date(p.target_date), "MMM d")}
@@ -1086,10 +1698,37 @@ export default function Workspace() {
                           )}
                         </div>
                         <div className="project-milestones">
-                          {p.updated_at && <small>Updated {format(new Date(p.updated_at), "MMM d")}</small>}
-                          {overdueMilestones.length > 0 && <span className="state error">{overdueMilestones.length} overdue</span>}
-                          {upcomingMilestones.length > 0 ? <small>Next: {upcomingMilestones[0].title} · {format(new Date(upcomingMilestones[0].due_at!), "MMM d")}</small> : <small>No upcoming task deadlines</small>}
-                          <button type="button" className="text-button" onClick={() => { setTaskProjectFilter(p.id); setSection("Tasks"); }}>View project tasks</button>
+                          {p.updated_at && (
+                            <small>
+                              Updated {format(new Date(p.updated_at), "MMM d")}
+                            </small>
+                          )}
+                          {overdueMilestones.length > 0 && (
+                            <span className="state error">
+                              {overdueMilestones.length} overdue
+                            </span>
+                          )}
+                          {upcomingMilestones.length > 0 ? (
+                            <small>
+                              Next: {upcomingMilestones[0].title} ·{" "}
+                              {format(
+                                new Date(upcomingMilestones[0].due_at!),
+                                "MMM d",
+                              )}
+                            </small>
+                          ) : (
+                            <small>No upcoming task deadlines</small>
+                          )}
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={() => {
+                              setTaskProjectFilter(p.id);
+                              changeSection("Tasks");
+                            }}
+                          >
+                            View project tasks
+                          </button>
                         </div>
                       </article>
                     );
@@ -1109,14 +1748,27 @@ export default function Workspace() {
             <CalendarView
               date={date}
               setDate={setDate}
-              events={events}
-              workSessions={workSessions}
+              events={calendarEvents}
+              workSessions={calendarWorkSessions}
               tasks={tasks}
-              assignments={assignments}
+              assignments={assignments.filter(
+                (assignment) => !assignment.ignored_at,
+              )}
               timezone={timezone}
+              weekStartsOn={weekStartsOn}
               loadRange={loadCalendarRange}
               loading={calendarLoading}
               addEvent={() => setModal("event")}
+              onSelectEvent={(event) =>
+                setEditingEvent(
+                  calendarEvents.find(
+                    (candidate) => candidate.id === event.id,
+                  ) || null,
+                )
+              }
+              onSessionStatus={(id, status) =>
+                void updateWorkSessionStatus(id, status)
+              }
             />
           )}
           {section === "Assignments" && (
@@ -1128,16 +1780,35 @@ export default function Workspace() {
                   <p>Imported coursework and your personal deadlines.</p>
                 </div>
                 <div className="heading-actions">
-                <select aria-label="Filter assignments by course" value={assignmentCourseFilter} onChange={(event) => setAssignmentCourseFilter(event.target.value)}>
-                  <option value="">All courses</option>
-                  {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-                </select>
-                <button
-                  className="button subtle"
-                  onClick={() => setSection("Courses")}
-                >
-                  <GraduationCap size={15} /> Manage courses
-                </button>
+                  <select
+                    aria-label="Filter assignments by course"
+                    value={assignmentCourseFilter}
+                    onChange={(event) =>
+                      setAssignmentCourseFilter(event.target.value)
+                    }
+                  >
+                    <option value="">All courses</option>
+                    {courses.map((course) => (
+                      <option key={course.id} value={course.id}>
+                        {course.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="button subtle"
+                    aria-pressed={showIgnoredAssignments}
+                    onClick={() => setShowIgnoredAssignments((shown) => !shown)}
+                  >
+                    {showIgnoredAssignments
+                      ? "Show active"
+                      : "Ignored coursework"}
+                  </button>
+                  <button
+                    className="button subtle"
+                    onClick={() => changeSection("Courses")}
+                  >
+                    <GraduationCap size={15} /> Manage courses
+                  </button>
                 </div>
               </div>
               {assignments.length === 0 ? (
@@ -1146,7 +1817,7 @@ export default function Workspace() {
                   title="No assignments yet"
                   text="Connect Schoology in Settings, or create a task manually. Assignment import stays under your control."
                   action="Open integrations"
-                  onAction={() => setSection("Settings")}
+                  onAction={() => changeSection("Settings")}
                 />
               ) : (
                 <div className="table-wrap">
@@ -1159,23 +1830,52 @@ export default function Workspace() {
                         <th>Your deadline</th>
                         <th>Status</th>
                         <th>Task</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {assignments.filter((assignment) => !assignmentCourseFilter || assignment.course_id === assignmentCourseFilter).map((a) => (
-                        <AssignmentRow
-                          key={a.id}
-                          assignment={a}
-                          course={
-                            courses.find((c) => c.id === a.course_id)?.name ||
-                            "—"
-                          }
-                          imported={tasks.some((t) => t.assignment_id === a.id)}
-                          importTask={() => importAssignment(a)}
-                          onError={setError}
-                          timezone={timezone}
-                        />
-                      ))}
+                      {assignments
+                        .filter((assignment) =>
+                          showIgnoredAssignments
+                            ? Boolean(assignment.ignored_at)
+                            : !assignment.ignored_at,
+                        )
+                        .filter(
+                          (assignment) =>
+                            !assignmentCourseFilter ||
+                            assignment.course_id === assignmentCourseFilter,
+                        )
+                        .map((a) => (
+                          <AssignmentRow
+                            key={a.id}
+                            assignment={a}
+                            course={
+                              courses.find((c) => c.id === a.course_id)?.name ||
+                              "—"
+                            }
+                            imported={tasks.some(
+                              (t) => t.assignment_id === a.id,
+                            )}
+                            importTask={() => importAssignment(a)}
+                            onError={setError}
+                            onRefresh={reload}
+                            timezone={timezone}
+                            ignored={Boolean(a.ignored_at)}
+                          />
+                        ))}
+                      {assignments.filter((assignment) =>
+                        showIgnoredAssignments
+                          ? Boolean(assignment.ignored_at)
+                          : !assignment.ignored_at,
+                      ).length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="muted">
+                            {showIgnoredAssignments
+                              ? "No ignored coursework. Ignored items can be restored here."
+                              : "No active coursework. Use Ignored coursework to review archived items."}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1185,11 +1885,13 @@ export default function Workspace() {
           {section === "Courses" && (
             <CoursesView
               courses={courses}
-              integration={integrations.find((item) => item.provider === "schoology") || null}
+              integration={
+                integrations.find((item) => item.provider === "schoology") ||
+                null
+              }
               onRefresh={reload}
-              toast={setToast}
               error={setError}
-              onSettings={() => setSection("Settings")}
+              onSettings={() => changeSection("Settings")}
             />
           )}
           {section === "AI Planner" && (
@@ -1222,13 +1924,26 @@ export default function Workspace() {
                   placeholder="Add context, e.g. robotics on Wednesday and a three-hour history assignment…"
                   rows={3}
                 />
+                <label className="ai-consent">
+                  <input
+                    type="checkbox"
+                    checked={allowExternalPlanner}
+                    onChange={(event) =>
+                      setAllowExternalPlanner(event.target.checked)
+                    }
+                  />
+                  Allow the configured AI provider to receive my task names,
+                  deadlines, calendar commitments, and this note to write the
+                  plan explanation. The schedule remains deterministic.
+                </label>
                 <button className="button primary" onClick={generatePlan}>
                   <Sparkles size={15} />{" "}
                   {planning ? "Building plan…" : "Generate a week plan"}
                 </button>
                 <div className="provider-note">
-                  The deterministic scheduler always works; when a server AI
-                  provider is configured, it adds a concise explanation.
+                  With permission unchecked, Daymark uses the deterministic
+                  scheduler and explanation only. Nothing is sent to an AI
+                  provider.
                 </div>
               </div>
               {proposal && (
@@ -1255,15 +1970,99 @@ export default function Workspace() {
                       No schedulable tasks in this date range.
                     </p>
                   ) : (
-                    [...proposal.slots].sort((a,b) => +a.start - +b.start).map((s) => (
-                      <div className={`proposal-row ${s.selected ? "" : "proposal-rejected"}`} key={s.id}>
-                        <input type="checkbox" aria-label={`Include ${s.title} on ${format(s.start, "MMM d")}`} checked={s.selected} onChange={(event) => setProposal((current) => current ? { ...current, slots: current.slots.map((slot) => slot.id === s.id ? { ...slot, selected: event.target.checked } : slot) } : current)} />
-                        <span className="status-dot in_progress" />
-                        <b>{s.title}</b>
-                        <label className="proposal-time">Start<input type="datetime-local" value={zonedInputValue(s.start.toISOString(), timezone)} onChange={(event) => setProposal((current) => current ? { ...current, slots: current.slots.map((slot) => slot.id === s.id ? { ...slot, start: wallTimeToUtc(event.target.value, timezone) } : slot) } : current)} /></label>
-                        <label className="proposal-time">End<input type="datetime-local" value={zonedInputValue(s.end.toISOString(), timezone)} onChange={(event) => setProposal((current) => current ? { ...current, slots: current.slots.map((slot) => slot.id === s.id ? { ...slot, end: wallTimeToUtc(event.target.value, timezone) } : slot) } : current)} /></label>
-                      </div>
-                    ))
+                    [...proposal.slots]
+                      .sort((a, b) => +a.start - +b.start)
+                      .map((s) => (
+                        <div
+                          className={`proposal-row ${s.selected ? "" : "proposal-rejected"}`}
+                          key={s.id}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`Include ${s.title} on ${format(s.start, "MMM d")}`}
+                            checked={s.selected}
+                            onChange={(event) =>
+                              setProposal((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      slots: current.slots.map((slot) =>
+                                        slot.id === s.id
+                                          ? {
+                                              ...slot,
+                                              selected: event.target.checked,
+                                            }
+                                          : slot,
+                                      ),
+                                    }
+                                  : current,
+                              )
+                            }
+                          />
+                          <span className="status-dot in_progress" />
+                          <b>{s.title}</b>
+                          <label className="proposal-time">
+                            Start
+                            <input
+                              type="datetime-local"
+                              value={zonedInputValue(
+                                s.start.toISOString(),
+                                timezone,
+                              )}
+                              onChange={(event) =>
+                                setProposal((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        slots: current.slots.map((slot) =>
+                                          slot.id === s.id
+                                            ? {
+                                                ...slot,
+                                                start: wallTimeToUtc(
+                                                  event.target.value,
+                                                  timezone,
+                                                ),
+                                              }
+                                            : slot,
+                                        ),
+                                      }
+                                    : current,
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="proposal-time">
+                            End
+                            <input
+                              type="datetime-local"
+                              value={zonedInputValue(
+                                s.end.toISOString(),
+                                timezone,
+                              )}
+                              onChange={(event) =>
+                                setProposal((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        slots: current.slots.map((slot) =>
+                                          slot.id === s.id
+                                            ? {
+                                                ...slot,
+                                                end: wallTimeToUtc(
+                                                  event.target.value,
+                                                  timezone,
+                                                ),
+                                              }
+                                            : slot,
+                                        ),
+                                      }
+                                    : current,
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
+                      ))
                   )}
                   <div className="proposal-actions">
                     <button
@@ -1273,73 +2072,154 @@ export default function Workspace() {
                         if (!supabase || !proposal) return;
                         setProposalBusy(true);
                         try {
-                          const { data: { user: currentUser } } = await supabase.auth.getUser();
-                          if (!currentUser) throw new Error("Your session expired. Sign in again.");
-                          const { error: saveError } = await supabase.from("ai_scheduling_proposals").insert({ id: proposal.id, user_id: currentUser.id, status: "rejected", proposal: proposal.slots.map((slot) => ({ taskId: slot.taskId, title: slot.title, start: slot.start.toISOString(), end: slot.end.toISOString() })) });
+                          const {
+                            data: { user: currentUser },
+                          } = await supabase.auth.getUser();
+                          if (!currentUser)
+                            throw new Error(
+                              "Your session expired. Sign in again.",
+                            );
+                          const { error: saveError } = await supabase
+                            .from("ai_scheduling_proposals")
+                            .insert({
+                              id: proposal.id,
+                              user_id: currentUser.id,
+                              status: "rejected",
+                              proposal: proposal.slots.map((slot) => ({
+                                taskId: slot.taskId,
+                                title: slot.title,
+                                start: slot.start.toISOString(),
+                                end: slot.end.toISOString(),
+                              })),
+                            });
                           if (saveError) throw saveError;
                           setProposal(null);
                           setToast("Proposal rejected");
-                        } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not reject proposal"); }
-                        finally { setProposalBusy(false); }
+                        } catch (failure) {
+                          setError(
+                            failure instanceof Error
+                              ? failure.message
+                              : "Could not reject proposal",
+                          );
+                        } finally {
+                          setProposalBusy(false);
+                        }
                       }}
                     >
                       Reject
                     </button>
                     <button
                       className="button primary"
-                      disabled={!proposal.slots.some((slot) => slot.selected) || proposalBusy}
+                      disabled={
+                        !proposal.slots.some((slot) => slot.selected) ||
+                        proposalBusy
+                      }
                       onClick={async () => {
                         if (!supabase) return;
                         setProposalBusy(true);
                         try {
-                        const selectedSlots = proposal.slots.filter((slot) => slot.selected);
-                        if (selectedSlots.some((slot) => slot.end <= slot.start)) { setError("Each session must end after it starts."); return; }
-                        const overlaps = (a: { start: Date; end: Date }, b: { start: Date; end: Date }) => a.start < b.end && a.end > b.start;
-                        const conflict = selectedSlots.some((slot, index) => events.some((event) => overlaps(slot, { start: new Date(event.starts_at), end: new Date(event.ends_at) })) || workSessions.some((session) => overlaps(slot, { start: new Date(session.starts_at), end: new Date(session.ends_at) })) || selectedSlots.slice(index + 1).some((other) => overlaps(slot, other)));
-                        if (conflict) { setError("Selected sessions overlap each other or an existing calendar item. Adjust the times and try again."); return; }
-                        const {
-                          data: { user: u },
-                        } = await supabase.auth.getUser();
-                        if (!u) return;
-                        const { data: prop } = await supabase
-                          .from("ai_scheduling_proposals")
-                          .insert({
-                            id: proposal.id,
-                            user_id: u.id,
-                            status: "accepted",
-                            proposal: proposal.slots.filter((slot) => slot.selected).map((slot) => ({ taskId: slot.taskId, title: slot.title, start: slot.start.toISOString(), end: slot.end.toISOString() })),
-                          })
-                          .select()
-                          .single();
-                        if (!prop) {
-                          setError("Could not save approved schedule.");
-                          return;
-                        }
-                        const result = await supabase
-                          .from("scheduled_work_sessions")
-                          .insert(
-                            proposal.slots.filter((slot) => slot.selected).map((s) => ({
-                              user_id: u.id,
-                              task_id: s.taskId,
-                              starts_at: s.start.toISOString(),
-                              ends_at: s.end.toISOString(),
-                              proposal_id: proposal.id,
-                            })),
+                          const selectedSlots = proposal.slots.filter(
+                            (slot) => slot.selected,
                           );
-                        if (result.error) {
-                          await supabase.from("ai_scheduling_proposals").delete().eq("id", proposal.id);
-                          setError(result.error.message);
+                          if (
+                            selectedSlots.some((slot) => slot.end <= slot.start)
+                          ) {
+                            setError("Each session must end after it starts.");
+                            return;
+                          }
+                          const overlaps = (
+                            a: { start: Date; end: Date },
+                            b: { start: Date; end: Date },
+                          ) => a.start < b.end && a.end > b.start;
+                          const conflict = selectedSlots.some(
+                            (slot, index) =>
+                              events.some((event) =>
+                                overlaps(slot, {
+                                  start: new Date(event.starts_at),
+                                  end: new Date(event.ends_at),
+                                }),
+                              ) ||
+                              workSessions.some((session) =>
+                                overlaps(slot, {
+                                  start: new Date(session.starts_at),
+                                  end: new Date(session.ends_at),
+                                }),
+                              ) ||
+                              selectedSlots
+                                .slice(index + 1)
+                                .some((other) => overlaps(slot, other)),
+                          );
+                          if (conflict) {
+                            setError(
+                              "Selected sessions overlap each other or an existing calendar item. Adjust the times and try again.",
+                            );
+                            return;
+                          }
+                          const {
+                            data: { user: u },
+                          } = await supabase.auth.getUser();
+                          if (!u) return;
+                          const { data: prop } = await supabase
+                            .from("ai_scheduling_proposals")
+                            .insert({
+                              id: proposal.id,
+                              user_id: u.id,
+                              status: "accepted",
+                              proposal: proposal.slots
+                                .filter((slot) => slot.selected)
+                                .map((slot) => ({
+                                  taskId: slot.taskId,
+                                  title: slot.title,
+                                  start: slot.start.toISOString(),
+                                  end: slot.end.toISOString(),
+                                })),
+                            })
+                            .select()
+                            .single();
+                          if (!prop) {
+                            setError("Could not save approved schedule.");
+                            return;
+                          }
+                          const result = await supabase
+                            .from("scheduled_work_sessions")
+                            .insert(
+                              proposal.slots
+                                .filter((slot) => slot.selected)
+                                .map((s) => ({
+                                  user_id: u.id,
+                                  task_id: s.taskId,
+                                  starts_at: s.start.toISOString(),
+                                  ends_at: s.end.toISOString(),
+                                  proposal_id: proposal.id,
+                                })),
+                            );
+                          if (result.error) {
+                            await supabase
+                              .from("ai_scheduling_proposals")
+                              .delete()
+                              .eq("id", proposal.id);
+                            setError(result.error.message);
+                          } else {
+                            setToast(
+                              `${proposal.slots.filter((slot) => slot.selected).length} sessions approved; ${proposal.slots.filter((slot) => !slot.selected).length} excluded`,
+                            );
+                            setProposal(null);
+                            await reload();
+                          }
+                        } catch (failure) {
+                          setError(
+                            failure instanceof Error
+                              ? failure.message
+                              : "Could not approve schedule",
+                          );
+                        } finally {
+                          setProposalBusy(false);
                         }
-                        else {
-                          setToast(`${proposal.slots.filter((slot) => slot.selected).length} sessions approved; ${proposal.slots.filter((slot) => !slot.selected).length} excluded`);
-                          setProposal(null);
-                          await reload();
-                        }
-                        } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not approve schedule"); }
-                        finally { setProposalBusy(false); }
                       }}
                     >
-                      {proposalBusy ? "Saving…" : `Approve ${proposal.slots.filter((slot) => slot.selected).length} sessions`}
+                      {proposalBusy
+                        ? "Saving…"
+                        : `Approve ${proposal.slots.filter((slot) => slot.selected).length} sessions`}
                     </button>
                   </div>
                 </div>
@@ -1350,7 +2230,15 @@ export default function Workspace() {
             <NotificationCenter onUnreadCountChange={setUnreadCount} />
           )}
           {section === "Settings" && (
-            <SettingsView user={user} integrations={integrations} onTimezoneChange={setTimezone} onSignOut={signOut} />
+            <SettingsView
+              user={user}
+              integrations={integrations}
+              onTimezoneChange={setTimezone}
+              onWeekStartsOnChange={setWeekStartsOn}
+              onDisplayNameChange={setDisplayName}
+              onSignOut={signOut}
+              onRefresh={reload}
+            />
           )}
         </div>
       </main>
@@ -1370,16 +2258,43 @@ export default function Workspace() {
           error={setError}
         />
       )}
+      {editingEvent && (
+        <CalendarEventModal
+          event={editingEvent}
+          timezone={timezone}
+          onClose={() => setEditingEvent(null)}
+          onSaved={async (message) => {
+            setEditingEvent(null);
+            setToast(message);
+            await reload();
+          }}
+        />
+      )}
       {editingTask && supabase && user && (
         <TaskDetailModal
           task={editingTask}
           projects={projects}
           supabase={supabase}
+          timezone={timezone}
+          courseworkContext={(() => {
+            const assignment = assignments.find(
+              (item) => item.id === editingTask.assignment_id,
+            );
+            return assignment
+              ? {
+                  courseName: courses.find(
+                    (course) => course.id === assignment.course_id,
+                  )?.name,
+                  dueAt:
+                    assignment.personal_due_at || assignment.original_due_at,
+                }
+              : null;
+          })()}
           userId={user?.id || ""}
           onClose={() => setEditingTask(null)}
           onSave={async (id, patch) => {
-            await updateTask(id, patch);
-            setEditingTask(null);
+            const success = await updateTask(id, patch);
+            if (success) setEditingTask(null);
           }}
           onDuplicate={async (task) => {
             await createTask(`${task.title} (copy)`, {
@@ -1393,10 +2308,52 @@ export default function Workspace() {
             setEditingTask(null);
           }}
           onDelete={async (id) => {
-            await removeTask(id);
-            setEditingTask(null);
+            setPendingDeletion({ kind: "task", id });
           }}
         />
+      )}
+      {pendingDeletion && (
+        <Modal
+          titleId="confirm-delete-title"
+          onClose={() => setPendingDeletion(null)}
+        >
+          <section className="modal" aria-describedby="confirm-delete-copy">
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">CONFIRM ACTION</div>
+                <h2 id="confirm-delete-title">
+                  Delete {pendingDeletion.kind}?
+                </h2>
+              </div>
+              <IconButton
+                label="Cancel delete"
+                onClick={() => setPendingDeletion(null)}
+              >
+                <X size={17} />
+              </IconButton>
+            </div>
+            <p id="confirm-delete-copy">
+              This removes the {pendingDeletion.kind} from Daymark. This action
+              cannot be undone.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="button subtle"
+                type="button"
+                onClick={() => setPendingDeletion(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button danger-outline"
+                type="button"
+                onClick={() => void confirmDeletion()}
+              >
+                Delete {pendingDeletion.kind}
+              </button>
+            </div>
+          </section>
+        </Modal>
       )}
     </div>
   );
@@ -1438,35 +2395,6 @@ function PanelTitle({
       <h2>{title}</h2>
       {action && (
         <button className="link-button" onClick={onClick}>
-          {action}
-          <ArrowRight size={13} />
-        </button>
-      )}
-    </div>
-  );
-}
-function Empty({
-  icon: Icon,
-  title,
-  text,
-  action,
-  onAction,
-  compact,
-}: {
-  icon: React.ElementType;
-  title: string;
-  text: string;
-  action?: string;
-  onAction?: () => void;
-  compact?: boolean;
-}) {
-  return (
-    <div className={`empty ${compact ? "compact" : ""}`}>
-      <Icon size={compact ? 18 : 22} />
-      <b>{title}</b>
-      <p>{text}</p>
-      {action && (
-        <button className="button subtle small-button" onClick={onAction}>
           {action}
           <ArrowRight size={13} />
         </button>
@@ -1531,7 +2459,11 @@ function TaskCard({
         >
           <MoreHorizontal size={14} />
         </button>
-        <button className="icon-button mini delete-task" onClick={onDelete}>
+        <button
+          className="icon-button mini delete-task"
+          aria-label={`Delete ${task.title}`}
+          onClick={onDelete}
+        >
           <Trash2 size={13} />
         </button>
       </div>
@@ -1558,793 +2490,6 @@ function TaskCard({
     </article>
   );
 }
-function CalendarView({
-  date,
-  setDate,
-  events,
-  workSessions,
-  tasks,
-  assignments,
-  timezone,
-  loadRange,
-  loading,
-  addEvent,
-}: {
-  date: Date;
-  setDate: (d: Date) => void;
-  events: Event[];
-  workSessions: WorkSession[];
-  tasks: Task[];
-  assignments: Assignment[];
-  timezone: string;
-  loadRange: (from: Date, to: Date) => Promise<void>;
-  loading: boolean;
-  addEvent: () => void;
-}) {
-  const [view, setView] = useState<"Month" | "Week" | "Day" | "Agenda">("Week");
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 640px)");
-    const applyNarrowFallback = () => { if (media.matches) setView((current) => current === "Week" ? "Agenda" : current); };
-    applyNarrowFallback();
-    media.addEventListener("change", applyNarrowFallback);
-    return () => media.removeEventListener("change", applyNarrowFallback);
-  }, []);
-  const start = useMemo(
-    () =>
-      view === "Month"
-        ? startOfWeek(startOfMonth(date), { weekStartsOn: 1 })
-        : startOfWeek(date, { weekStartsOn: 1 }),
-    [date, view],
-  );
-  const days =
-    view === "Month"
-      ? eachDayOfInterval({ start, end: addDays(start, 41) })
-      : view === "Day"
-        ? [date]
-        : Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  useEffect(() => {
-    const visibleStart = view === "Month" ? start : view === "Day" ? date : start;
-    const visibleEnd = view === "Month" ? addDays(start, 42) : view === "Day" ? addDays(date, 1) : addDays(start, 7);
-    void loadRange(zonedMidnight(visibleStart, timezone), zonedMidnight(visibleEnd, timezone));
-  }, [date, loadRange, start, timezone, view]);
-  const entries = [
-    ...events.map((e) => ({
-      id: e.id,
-      title: e.title,
-      time: e.starts_at,
-      end: e.ends_at,
-      color: e.color,
-      kind: "Event",
-      deadline: false,
-    })),
-    ...workSessions.map((s) => ({
-      id: s.id,
-      title: tasks.find((t) => t.id === s.task_id)?.title || "Planned work",
-      time: s.starts_at,
-      end: s.ends_at,
-      color: "var(--accent)",
-      kind: "Work session",
-      deadline: false,
-    })),
-    ...tasks
-      .filter((t) => t.due_at && t.status !== "completed")
-      .map((t) => ({
-        id: t.id,
-        title: t.title,
-        time: t.due_at!,
-        end: null,
-        color: "var(--warning)",
-        kind: "Task deadline",
-        deadline: true,
-      })),
-  ];
-  const assignmentEntries = assignments.filter((a) => (a.personal_due_at || a.original_due_at) && !(a.personal_completed ?? a.original_completed)).map((a) => ({
-    id: a.id, title: a.personal_title || a.title, time: a.personal_due_at || a.original_due_at!, end: null,
-    color: "var(--info)", kind: "Assignment deadline", deadline: true,
-  }));
-  const allEntries = [...entries, ...assignmentEntries];
-  const moveDate = (direction: -1 | 1) => setDate(view === "Month" ? (direction > 0 ? addMonths(date, 1) : subMonths(date, 1)) : addDays(date, direction * (view === "Day" ? 1 : 7)));
-  return (
-    <>
-      <div className="page-heading calendar-heading">
-        <div>
-          <div className="eyebrow">YOUR TIME</div>
-          <h1>Calendar</h1>
-          <p>See commitments and deadlines together.</p>
-        </div>
-        <button className="button primary" onClick={addEvent}>
-          <Plus size={15} /> Add event
-        </button>
-      </div>
-      <div className="calendar-toolbar">
-        <div className="date-nav">
-          <button
-            className="button subtle small-button"
-            onClick={() => setDate(new Date())}
-          >
-            Today
-          </button>
-          <button
-            className="icon-button"
-            onClick={() => moveDate(-1)}
-          >
-            <ChevronLeft size={17} />
-          </button>
-          <button className="icon-button" onClick={() => moveDate(1)}>
-            <ChevronRight size={17} />
-          </button>
-          <h2>{format(date, view === "Day" ? "MMMM d, yyyy" : "MMMM yyyy")}</h2>
-        </div>
-        <div className="view-switch">
-          {(["Day", "Week", "Month", "Agenda"] as const).map((v) => (
-            <button
-              className={view === v ? "selected" : ""}
-              onClick={() => setView(v)}
-              key={v}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-      </div>
-      {loading && <div className="calendar-loading" role="status">Loading this date range…</div>}
-      {view === "Agenda" ? (
-        <div className="panel agenda-list">
-          {allEntries
-            .filter(
-              (e) =>
-                new Date(e.time) >= zonedMidnight(startOfWeek(date, { weekStartsOn: 1 }), timezone) &&
-                new Date(e.time) < zonedMidnight(addDays(startOfWeek(date, { weekStartsOn: 1 }), 7), timezone),
-            )
-            .sort((a, b) => +new Date(a.time) - +new Date(b.time))
-            .map((e) => (
-              <div className="agenda-row" key={e.id}>
-                <time>{new Intl.DateTimeFormat(undefined, { timeZone: timezone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(e.time))}</time>
-                <span style={{ background: e.color }} />
-                <b>{e.title}</b>
-                <small>{e.kind}</small>
-              </div>
-            ))}
-          {allEntries.length === 0 && (
-            <Empty
-              icon={CalendarDays}
-              title="No scheduled items"
-              text="Create an event or schedule task work."
-            />
-          )}
-        </div>
-      ) : view === "Month" ? (
-        <div className={`calendar-grid ${view.toLowerCase()}`}>
-          <div className="calendar-weekdays">
-            {days.map((d) => (
-              <div key={d.toISOString()}>{format(d, "EEE")}</div>
-            ))}
-          </div>
-          <div className="calendar-cells">
-            {days.map((d) => {
-              const dayEntries = allEntries.filter((e) =>
-                sameZonedDay(e.time, d, timezone),
-              );
-              return (
-                <div
-                  key={d.toISOString()}
-                  className={`calendar-cell ${!isSameMonth(d, date) && view === "Month" ? "outside" : ""} ${isSameDay(d, new Date()) ? "is-today" : ""}`}
-                  onDoubleClick={addEvent}
-                >
-                  <span className="cell-date">
-                    {format(d, "d")}
-                  </span>
-                  {dayEntries.slice(0, view === "Month" ? 3 : 8).map((e) => (
-                    <div
-                      className={`calendar-item ${e.deadline ? "calendar-deadline" : ""}`}
-                      key={e.id}
-                      style={{ borderLeftColor: e.color }}
-                      title={e.title}
-                    >
-                      {e.deadline ? "Due · " : `${zonedTime(e.time, timezone)} · `}{e.title}
-                    </div>
-                  ))}
-                  {dayEntries.length > 3 && view === "Month" && (
-                    <small className="muted">
-                      +{dayEntries.length - 3} more
-                    </small>
-                  )}
-                  <button className="cell-add" onClick={addEvent}>
-                    <Plus size={13} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className={`time-calendar ${view.toLowerCase()}`}>
-          <div className="time-day-head"><div /><div>{days.map((day) => <div key={day.toISOString()} className={isSameDay(day, now) ? "is-today" : ""}>{format(day, "EEE d")}</div>)}</div></div>
-          <div className="time-all-day"><b>All day</b><div>{days.map((day) => <div key={day.toISOString()} className="all-day-items">{allEntries.filter((entry) => entry.deadline && sameZonedDay(entry.time, day, timezone)).map((entry) => <span key={entry.id} title={entry.title} className="deadline-chip">{entry.kind}: {entry.title}</span>)}</div>)}</div></div>
-          <div className="time-scroll"><div className="time-axis">{Array.from({ length: 18 }, (_, i) => i + 6).map((hour) => <div key={hour}>{format(new Date(2000, 0, 1, hour), "h a")}</div>)}</div><div className="time-columns">{days.map((day) => {
-            const dayStart = zonedMidnight(day, timezone);
-            const dayEnd = zonedMidnight(addDays(day, 1), timezone);
-            const dayEntries = allEntries.filter((entry) => !entry.deadline && new Date(entry.time) < dayEnd && new Date(entry.end || new Date(+new Date(entry.time) + 30 * 60_000)) > dayStart).sort((a, b) => +new Date(a.time) - +new Date(b.time));
-            const lanes: number[] = [];
-            const positioned = dayEntries.map((entry) => {
-              const startAt = new Date(entry.time);
-              const startParts = zonedPartsOf(startAt, timezone);
-              const startMinute = startAt < dayStart ? 360 : Math.max(360, startParts.hour * 60 + startParts.minute);
-              const endAt = new Date(entry.end || new Date(+startAt + 30 * 60_000));
-              const endParts = zonedPartsOf(endAt, timezone);
-              const endMinute = Math.min(1440, Math.max(startMinute + 24, endAt >= dayEnd ? 1440 : endParts.hour * 60 + endParts.minute));
-              let lane = lanes.findIndex((laneEnd) => laneEnd <= startMinute);
-              if (lane < 0) lane = lanes.length;
-              lanes[lane] = endMinute;
-              return { entry, startMinute, endMinute, lane };
-            });
-            const laneCount = Math.max(1, lanes.length);
-            const nowParts = zonedPartsOf(now, timezone);
-            const showNow = sameZonedDay(day, now, timezone) && nowParts.hour >= 6 && nowParts.hour < 24;
-            const nowTop = ((nowParts.hour * 60 + nowParts.minute - 360) / 1080) * 100;
-            return <div className={`time-day ${isSameDay(day, now) ? "today" : ""}`} key={day.toISOString()} onDoubleClick={addEvent}>
-              {Array.from({ length: 18 }, (_, i) => <div className="time-hour-line" key={i} style={{ top: `${(i / 18) * 100}%` }} />)}
-              {positioned.map(({ entry, startMinute, endMinute, lane }) => <div className={`time-event ${endMinute - startMinute < 40 ? "compact" : ""}`} key={entry.id} title={`${entry.kind}: ${entry.title}`} style={{ top: `${((startMinute - 360) / 1080) * 100}%`, height: `${Math.max(2.3, ((endMinute - startMinute) / 1080) * 100)}%`, left: `calc(${(lane / laneCount) * 100}% + 2px)`, width: `calc(${100 / laneCount}% - 4px)`, borderLeftColor: entry.color }}><b>{entry.title}</b><small>{zonedTime(entry.time, timezone)}–{zonedTime(entry.end || new Date(+new Date(entry.time) + 30 * 60_000), timezone)}</small></div>)}
-              {showNow && <div className="current-time-line" style={{ top: `${nowTop}%` }}><i />{format(now, "h:mm a")}</div>}
-            </div>;
-          })}</div></div>
-        </div>
-      )}
-    </>
-  );
-}
-function TaskDetailModal({
-  task,
-  projects,
-  supabase,
-  userId,
-  onClose,
-  onSave,
-  onDuplicate,
-  onDelete,
-}: {
-  task: Task;
-  projects: Project[];
-  supabase: NonNullable<ReturnType<typeof createClient>>;
-  userId: string;
-  onClose: () => void;
-  onSave: (id: string, patch: Partial<Task>) => Promise<void>;
-  onDuplicate: (task: Task) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-}) {
-  const [title, setTitle] = useState(task.title);
-  const [description, setDescription] = useState(task.description || "");
-  const [status, setStatus] = useState(task.status);
-  const [priority, setPriority] = useState(task.priority);
-  const [due, setDue] = useState(
-    task.due_at ? format(new Date(task.due_at), "yyyy-MM-dd'T'HH:mm") : "",
-  );
-  const [minutes, setMinutes] = useState(
-    task.estimated_minutes?.toString() || "",
-  );
-  const [projectId, setProjectId] = useState(task.project_id || "");
-  const [busy, setBusy] = useState(false);
-  const [subtasks, setSubtasks] = useState<
-    { id: string; title: string; is_completed: boolean }[]
-  >([]);
-  const [comments, setComments] = useState<
-    { id: string; body: string; created_at: string }[]
-  >([]);
-  const [subtaskTitle, setSubtaskTitle] = useState("");
-  const [comment, setComment] = useState("");
-  useEffect(() => {
-    let active = true;
-    async function loadDetails() {
-      const [subtaskResult, commentResult] = await Promise.all([
-        supabase
-          .from("subtasks")
-          .select("id,title,is_completed")
-          .eq("task_id", task.id)
-          .order("position"),
-        supabase
-          .from("task_comments")
-          .select("id,body,created_at")
-          .eq("task_id", task.id)
-          .order("created_at", { ascending: false }),
-      ]);
-      if (!active) return;
-      if (!subtaskResult.error) setSubtasks(subtaskResult.data || []);
-      if (!commentResult.error) setComments(commentResult.data || []);
-    }
-    void loadDetails();
-    return () => {
-      active = false;
-    };
-  }, [supabase, task.id]);
-  async function addSubtask(event: React.FormEvent) {
-    event.preventDefault();
-    const value = subtaskTitle.trim();
-    if (!value) return;
-    const result = await supabase
-      .from("subtasks")
-      .insert({
-        user_id: userId,
-        task_id: task.id,
-        title: value,
-        position: subtasks.length,
-      })
-      .select("id,title,is_completed")
-      .single();
-    if (!result.error) {
-      setSubtasks((items) => [...items, result.data]);
-      setSubtaskTitle("");
-    }
-  }
-  async function toggleSubtask(item: (typeof subtasks)[number]) {
-    const result = await supabase
-      .from("subtasks")
-      .update({ is_completed: !item.is_completed })
-      .eq("id", item.id);
-    if (!result.error)
-      setSubtasks((items) =>
-        items.map((entry) =>
-          entry.id === item.id
-            ? { ...entry, is_completed: !entry.is_completed }
-            : entry,
-        ),
-      );
-  }
-  async function addComment(event: React.FormEvent) {
-    event.preventDefault();
-    const value = comment.trim();
-    if (!value) return;
-    const result = await supabase
-      .from("task_comments")
-      .insert({ user_id: userId, task_id: task.id, body: value })
-      .select("id,body,created_at")
-      .single();
-    if (!result.error) {
-      setComments((items) => [result.data, ...items]);
-      setComment("");
-    }
-  }
-  async function save(event: React.FormEvent) {
-    event.preventDefault();
-    if (!title.trim()) return;
-    setBusy(true);
-    await onSave(task.id, {
-      title: title.trim(),
-      description,
-      status,
-      priority,
-      due_at: due ? new Date(due).toISOString() : null,
-      estimated_minutes: minutes ? Number(minutes) : null,
-      project_id: projectId || null,
-    });
-    setBusy(false);
-  }
-  return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <form className="modal" onSubmit={save}>
-        <div className="modal-head">
-          <div>
-            <div className="eyebrow">TASK DETAILS</div>
-            <h2>Edit task</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose}>
-            <X size={17} />
-          </button>
-        </div>
-        <label>
-          Title
-          <input
-            required
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </label>
-        <label>
-          Description
-          <textarea
-            rows={4}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
-        <div className="form-row">
-          <label>
-            Status
-            <select value={status} onChange={(e) => setStatus(e.target.value)}>
-              {statuses.map((s) => (
-                <option key={s} value={s}>
-                  {label(s)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Priority
-            <select
-              value={priority}
-              onChange={(e) => setPriority(e.target.value)}
-            >
-              {["low", "medium", "high", "urgent"].map((s) => (
-                <option key={s} value={s}>
-                  {label(s)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Due date
-            <input
-              type="datetime-local"
-              value={due}
-              onChange={(e) => setDue(e.target.value)}
-            />
-          </label>
-          <label>
-            Estimate (minutes)
-            <input
-              type="number"
-              min="5"
-              step="5"
-              value={minutes}
-              onChange={(e) => setMinutes(e.target.value)}
-            />
-          </label>
-        </div>
-        <label>
-          Project
-          <select
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-          >
-            <option value="">No project</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <section className="detail-section">
-          <div className="section-heading">
-            <h3>Checklist</h3>
-            <span className="muted">
-              {subtasks.filter((item) => item.is_completed).length}/
-              {subtasks.length}
-            </span>
-          </div>
-          {subtasks.map((item) => (
-            <label className="checklist-row" key={item.id}>
-              <input
-                type="checkbox"
-                checked={item.is_completed}
-                onChange={() => void toggleSubtask(item)}
-              />
-              <span className={item.is_completed ? "completed-text" : ""}>
-                {item.title}
-              </span>
-            </label>
-          ))}
-          <form className="inline-add" onSubmit={addSubtask}>
-            <input
-              aria-label="New checklist item"
-              value={subtaskTitle}
-              onChange={(e) => setSubtaskTitle(e.target.value)}
-              placeholder="Add checklist item"
-            />
-            <button className="button subtle small-button" type="submit">
-              Add
-            </button>
-          </form>
-        </section>
-        <section className="detail-section">
-          <div className="section-heading">
-            <h3>Notes</h3>
-            <span className="muted">{comments.length}</span>
-          </div>
-          <form className="inline-add" onSubmit={addComment}>
-            <input
-              aria-label="Task note"
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="Add a note"
-            />
-            <button className="button subtle small-button" type="submit">
-              Post
-            </button>
-          </form>
-          {comments.map((entry) => (
-            <article className="comment-row" key={entry.id}>
-              <p>{entry.body}</p>
-              <time>{format(new Date(entry.created_at), "MMM d, h:mm a")}</time>
-            </article>
-          ))}
-        </section>
-        <div className="modal-actions task-detail-actions">
-          <button
-            className="button danger-outline small-button"
-            type="button"
-            onClick={() => onDelete(task.id)}
-          >
-            Delete
-          </button>
-          <button
-            className="button subtle small-button"
-            type="button"
-            onClick={() => onDuplicate(task)}
-          >
-            Duplicate
-          </button>
-          <span />
-          <button className="button subtle" type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="button primary" disabled={busy}>
-            {busy ? "Saving…" : "Save changes"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function CreateModal({
-  kind,
-  close,
-  projects,
-  saveTask,
-  saved,
-  supabase,
-  timezone,
-  toast,
-  error,
-}: {
-  kind: "task" | "event" | "project";
-  close: () => void;
-  projects: Project[];
-  saveTask: (title: string, extra: Partial<Task>) => Promise<void>;
-  saved: () => Promise<void>;
-  supabase: ReturnType<typeof createClient>;
-  timezone: string;
-  toast: (s: string) => void;
-  error: (s: string) => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState("medium");
-  const [due, setDue] = useState("");
-  const [estimate, setEstimate] = useState("");
-  const [project, setProject] = useState("");
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    if (!title.trim()) {
-      setBusy(false);
-      return;
-    }
-    if (kind === "task") {
-      if (due && !Number.isFinite(wallTimeToUtc(due, timezone).getTime())) {
-        error("That time does not exist in your timezone because the clock changes. Choose another time.");
-        setBusy(false);
-        return;
-      }
-      await saveTask(title.trim(), {
-        description,
-        priority,
-        due_at: due ? wallTimeToUtc(due, timezone).toISOString() : null,
-        project_id: project || null,
-        estimated_minutes: estimate ? Number(estimate) : null,
-        status: "todo",
-      });
-      close();
-    } else if (kind === "event") {
-      if (!supabase) return;
-      const a = start ? wallTimeToUtc(start, timezone) : new Date(NaN),
-        b = end ? wallTimeToUtc(end, timezone) : new Date(NaN);
-      if (!start || !end || !Number.isFinite(a.getTime()) || !Number.isFinite(b.getTime()) || b <= a) {
-        error("Choose a valid start and end time in your timezone.");
-        setBusy(false);
-        return;
-      }
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      const result = await supabase
-        .from("calendar_events")
-        .insert({
-          user_id: user?.id,
-          title,
-          description,
-          starts_at: a.toISOString(),
-          ends_at: b.toISOString(),
-          timezone,
-        })
-        .select()
-        .single();
-      if (result.error) error(result.error.message);
-      else {
-        toast("Event scheduled");
-        await saved();
-      }
-      close();
-    } else {
-      if (!supabase) return;
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      const result = await supabase
-        .from("projects")
-        .insert({
-          user_id: user?.id,
-          name: title,
-          description,
-          color: "#8bae96",
-        })
-        .select()
-        .single();
-      if (result.error) error(result.error.message);
-      else {
-        toast("Project created");
-        await saved();
-      }
-      close();
-    }
-    setBusy(false);
-  }
-  return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close();
-      }}
-    >
-      <form className="modal" onSubmit={submit}>
-        <div className="modal-head">
-          <div>
-            <div className="eyebrow">
-              {kind === "task"
-                ? "GET IT MOVING"
-                : kind === "event"
-                  ? "MAKE TIME"
-                  : "GIVE IT A HOME"}
-            </div>
-            <h2>
-              {kind === "task"
-                ? "Create a task"
-                : kind === "event"
-                  ? "Schedule an event"
-                  : "Create a project"}
-            </h2>
-          </div>
-          <button className="icon-button" type="button" onClick={close}>
-            <X size={17} />
-          </button>
-        </div>
-        <label>
-          {kind === "project" ? "Project name" : "Title"}
-          <input
-            autoFocus
-            required
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder={
-              kind === "task"
-                ? "What needs to get done?"
-                : kind === "event"
-                  ? "What’s happening?"
-                  : "A name for this project"
-            }
-          />
-        </label>
-        {kind !== "task" && <label>
-          Description
-          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Add some context…" />
-        </label>}
-        {kind === "task" && <details className="task-advanced">
-          <summary>Task details</summary>
-          <label>Description<textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Add some context…" /></label>
-          <div className="form-row">
-            <label>
-              Priority
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-              >
-                {["low", "medium", "high", "urgent"].map((x) => (
-                  <option key={x} value={x}>
-                    {label(x)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Due date
-              <input
-                type="datetime-local"
-                value={due}
-                onChange={(e) => setDue(e.target.value)}
-              />
-            </label>
-          </div>
-          <label>
-            Project
-            <select
-              value={project}
-              onChange={(e) => setProject(e.target.value)}
-            >
-              <option value="">No project</option>
-              {projects.map((p) => (
-                <option value={p.id} key={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Estimated duration (minutes)
-            <input
-              type="number"
-              min="5"
-              step="5"
-              value={estimate}
-              onChange={(e) => setEstimate(e.target.value)}
-              placeholder="60"
-            />
-          </label>
-        </details>}
-        {kind === "event" && (
-          <div className="form-row">
-            <label>
-              Starts
-              <input
-                type="datetime-local"
-                required
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-              />
-            </label>
-            <label>
-              Ends
-              <input
-                type="datetime-local"
-                required
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-              />
-            </label>
-          </div>
-        )}
-        <div className="modal-actions">
-          <button className="button subtle" type="button" onClick={close}>
-            Cancel
-          </button>
-          <button className="button primary" disabled={busy}>
-            {busy
-              ? "Saving…"
-              : kind === "task"
-                ? "Create task"
-                : kind === "event"
-                  ? "Save event"
-                  : "Create project"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
 function NotificationCenter({
   onUnreadCountChange,
 }: {
@@ -2367,15 +2512,23 @@ function NotificationCenter({
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     const c = createClient();
-    c?.from("notifications")
-      .select("id,kind,title,body,target_url,read_at,created_at")
-      .order("created_at", { ascending: false })
-      .limit(50)
-      .then(({ data, error }) => {
-        if (error) setError(error.message);
-        else setRows(data || []);
-        setLoading(false);
-      });
+    Promise.all([
+      c
+        ?.from("notifications")
+        .select("id,kind,title,body,target_url,read_at,created_at")
+        .order("created_at", { ascending: false })
+        .limit(50),
+      c
+        ?.from("notification_preferences")
+        .select("in_app_enabled")
+        .maybeSingle(),
+    ]).then(([result, preference]) => {
+      const { data, error } = result || { data: null, error: null };
+      if (error) setError(error.message);
+      else
+        setRows(preference?.data?.in_app_enabled === false ? [] : data || []);
+      setLoading(false);
+    });
   }, []);
   async function read(id: string) {
     const existing = rows.find((n) => n.id === id);
@@ -2391,9 +2544,7 @@ function NotificationCenter({
       return;
     }
     const readAt = new Date().toISOString();
-    setRows((v) =>
-      v.map((n) => (n.id === id ? { ...n, read_at: readAt } : n)),
-    );
+    setRows((v) => v.map((n) => (n.id === id ? { ...n, read_at: readAt } : n)));
     onUnreadCountChange((count) => Math.max(0, count - 1));
   }
   async function readAll() {
@@ -2403,10 +2554,18 @@ function NotificationCenter({
     if (!c) return;
     setBusy(true);
     const readAt = new Date().toISOString();
-    const { error } = await c.from("notifications").update({ read_at: readAt }).is("read_at", null);
+    const { error } = await c
+      .from("notifications")
+      .update({ read_at: readAt })
+      .is("read_at", null);
     setBusy(false);
-    if (error) { setError(error.message); return; }
-    setRows((current) => current.map((row) => row.read_at ? row : { ...row, read_at: readAt }));
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setRows((current) =>
+      current.map((row) => (row.read_at ? row : { ...row, read_at: readAt })),
+    );
     onUnreadCountChange(0);
   }
   const visibleRows = rows.filter((row) => filter === "all" || !row.read_at);
@@ -2420,21 +2579,46 @@ function NotificationCenter({
         </div>
         <div className="heading-actions">
           <div className="view-switch" aria-label="Notification filter">
-            <button type="button" className={filter === "all" ? "selected" : ""} onClick={() => setFilter("all")}>All</button>
-            <button type="button" className={filter === "unread" ? "selected" : ""} onClick={() => setFilter("unread")}>Unread</button>
+            <button
+              type="button"
+              className={filter === "all" ? "selected" : ""}
+              onClick={() => setFilter("all")}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              className={filter === "unread" ? "selected" : ""}
+              onClick={() => setFilter("unread")}
+            >
+              Unread
+            </button>
           </div>
-          <button type="button" className="button subtle small-button" onClick={readAll} disabled={busy || !rows.some((row) => !row.read_at)}>{busy ? "Marking…" : "Mark all read"}</button>
+          <button
+            type="button"
+            className="button subtle small-button"
+            onClick={readAll}
+            disabled={busy || !rows.some((row) => !row.read_at)}
+          >
+            {busy ? "Marking…" : "Mark all read"}
+          </button>
         </div>
       </div>
       {error && <div className="notice error">{error}</div>}
       <NotificationPreferences />
       <div className="panel notification-list">
-        {loading ? <div className="loading-inline">Loading notifications…</div> : visibleRows.length ? (
+        {loading ? (
+          <div className="loading-inline">Loading notifications…</div>
+        ) : visibleRows.length ? (
           visibleRows.map((n) => (
             <a
               className={`notification-row ${n.read_at ? "read" : "unread"}`}
               key={n.id}
-              href={n.target_url?.startsWith("/") && !n.target_url.startsWith("//") ? n.target_url : "/app"}
+              href={
+                n.target_url?.startsWith("/") && !n.target_url.startsWith("//")
+                  ? n.target_url
+                  : "/app"
+              }
               onClick={() => read(n.id)}
             >
               <span className="notification-icon">
@@ -2454,879 +2638,22 @@ function NotificationCenter({
         ) : (
           <Empty
             icon={Bell}
-            title={filter === "unread" ? "No unread notifications" : "You’re all caught up"}
-            text={filter === "unread" ? "You’ve read all recent notifications." : "In-app reminders and schedule updates will show up here."}
-          />
-        )}
-      </div>
-    </>
-  );
-}
-function NotificationPreferences() {
-  const [value, setValue] = useState({
-    in_app_enabled: true,
-    push_enabled: false,
-    discord_enabled: false,
-    discord_user_id: "",
-    email_enabled: false,
-    reminder_minutes: [1440, 120],
-    quiet_start: "",
-    quiet_end: "",
-    daily_summary: false,
-    weekly_summary: false,
-  });
-  const [message, setMessage] = useState("");
-  const [testingDiscord, setTestingDiscord] = useState(false);
-  const [discordLinked, setDiscordLinked] = useState(false);
-  useEffect(() => {
-    const c = createClient();
-    fetch("/api/integrations/discord")
-      .then((response) => response.json())
-      .then((result: { connected?: boolean }) =>
-        setDiscordLinked(result.connected === true),
-      )
-      .catch(() => setDiscordLinked(false));
-    c?.from("notification_preferences")
-      .select("*")
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (error) { setMessage(error.message); return; }
-        if (data)
-          setValue((v) => ({
-            ...v,
-            ...data,
-            discord_user_id: data.discord_user_id || "",
-            quiet_start: data.quiet_start || "",
-            quiet_end: data.quiet_end || "",
-          }));
-      });
-  }, []);
-  async function save() {
-    const c = createClient();
-    if (!c) {
-      setMessage("Supabase is not configured.");
-      return false;
-    }
-    const { data } = await c.auth.getUser();
-    const { error } = await c.from("notification_preferences").upsert({
-      ...value,
-      user_id: data.user?.id,
-      discord_user_id: value.discord_user_id || null,
-      quiet_start: value.quiet_start || null,
-      quiet_end: value.quiet_end || null,
-    });
-    setMessage(error ? error.message : "Notification preferences saved.");
-    return !error;
-  }
-  async function testDiscord() {
-    setTestingDiscord(true);
-    setMessage("");
-    try {
-      if (!(await save())) return;
-      const response = await fetch("/api/notifications/discord-test", {
-        method: "POST",
-      });
-      const result = (await response.json()) as {
-        ok?: boolean;
-        error?: string;
-      };
-      setMessage(
-        response.ok && result.ok
-          ? "Test Discord notification sent. Check your DMs."
-          : result.error || "Could not send the Discord test notification.",
-      );
-    } catch {
-      setMessage("Could not send the Discord test notification. Try again.");
-    } finally {
-      setTestingDiscord(false);
-    }
-  }
-  async function unlinkDiscord() {
-    setMessage("");
-    try {
-      const response = await fetch("/api/integrations/discord", {
-        method: "DELETE",
-      });
-      const result = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        setMessage(result.error || "Could not unlink Discord.");
-        return;
-      }
-      setValue((v) => ({ ...v, discord_user_id: "", discord_enabled: false }));
-      setDiscordLinked(false);
-      setMessage("Discord account unlinked.");
-    } catch {
-      setMessage("Could not unlink Discord. Please try again.");
-    }
-  }
-  async function subscribePush() {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-      setMessage("Browser push is not available in this browser.");
-      return;
-    }
-    const key = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    if (!key) {
-      setMessage(
-        "Set NEXT_PUBLIC_VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY first.",
-      );
-      return;
-    }
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") {
-      setMessage("Browser notification permission was not granted.");
-      return;
-    }
-    const registration = await navigator.serviceWorker.register("/sw.js");
-    const subscription =
-      (await registration.pushManager.getSubscription()) ||
-      (await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: Uint8Array.from(
-          atob(key.replace(/-/g, "+").replace(/_/g, "/")),
-          (c) => c.charCodeAt(0),
-        ),
-      }));
-    const result = await fetch("/api/push/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(subscription.toJSON()),
-    });
-    setMessage(
-      result.ok
-        ? "Browser push is enabled."
-        : "Could not save push subscription.",
-    );
-  }
-  function toggle(
-    key:
-      | "in_app_enabled"
-      | "push_enabled"
-      | "discord_enabled"
-      | "email_enabled"
-      | "daily_summary"
-      | "weekly_summary",
-  ) {
-    setValue((v) => ({ ...v, [key]: !v[key] }));
-  }
-  return (
-    <section className="panel notification-preferences">
-      <div className="panel-heading">
-        <h2>Reminder preferences</h2>
-        <button className="button subtle small-button" onClick={save}>
-          Save preferences
-        </button>
-      </div>
-      <div className="preference-grid">
-        <label>
-          <input
-            type="checkbox"
-            checked={value.in_app_enabled}
-            onChange={() => toggle("in_app_enabled")}
-          />{" "}
-          In-app
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={value.push_enabled}
-            onChange={() => toggle("push_enabled")}
-          />{" "}
-          Browser push
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={value.discord_enabled}
-            onChange={() => toggle("discord_enabled")}
-          />{" "}
-          Discord DM
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={value.email_enabled}
-            onChange={() => toggle("email_enabled")}
-          />{" "}
-          Email
-        </label>
-      </div>
-      <div className="preference-grid secondary">
-        <span className="muted reminder-label">Remind me</span>
-        {[4320, 1440, 120].map((minutes) => (
-          <label key={minutes}>
-            <input
-              type="checkbox"
-              checked={value.reminder_minutes.includes(minutes)}
-              onChange={() =>
-                setValue((v) => ({
-                  ...v,
-                  reminder_minutes: v.reminder_minutes.includes(minutes)
-                    ? v.reminder_minutes.filter((item) => item !== minutes)
-                    : [...v.reminder_minutes, minutes].sort((a, b) => b - a),
-                }))
-              }
-            />
-            {minutes === 4320
-              ? "3 days before"
-              : minutes === 1440
-                ? "1 day before"
-                : "2 hours before"}
-          </label>
-        ))}
-        <label>
-          <input
-            type="checkbox"
-            checked={value.daily_summary}
-            onChange={() => toggle("daily_summary")}
-          />{" "}
-          Daily summary
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={value.weekly_summary}
-            onChange={() => toggle("weekly_summary")}
-          />{" "}
-          Weekly summary
-        </label>
-        <label>
-          Quiet from{" "}
-          <input
-            type="time"
-            value={value.quiet_start}
-            onChange={(e) =>
-              setValue((v) => ({ ...v, quiet_start: e.target.value }))
+            title={
+              filter === "unread"
+                ? "No unread notifications"
+                : "You’re all caught up"
+            }
+            text={
+              filter === "unread"
+                ? "You’ve read all recent notifications."
+                : "In-app reminders and schedule updates will show up here."
             }
           />
-        </label>
-        <label>
-          until{" "}
-          <input
-            type="time"
-            value={value.quiet_end}
-            onChange={(e) =>
-              setValue((v) => ({ ...v, quiet_end: e.target.value }))
-            }
-          />
-        </label>
-      </div>
-      <div className="preference-footer">
-        <div className="discord-link-status">
-          <span className="muted">
-            {discordLinked
-              ? "Discord account linked"
-              : "No Discord account linked"}
-          </span>
-          <a
-            className="button subtle small-button"
-            href="/api/integrations/discord/connect"
-          >
-            {discordLinked ? "Reconnect Discord" : "Link Discord account"}
-          </a>
-          {discordLinked && (
-            <button
-              className="button subtle small-button"
-              onClick={unlinkDiscord}
-            >
-              Unlink
-            </button>
-          )}
-        </div>
-        <button className="button subtle small-button" onClick={subscribePush}>
-          Enable browser push
-        </button>
-        <button
-          className="button subtle small-button"
-          onClick={testDiscord}
-          disabled={testingDiscord}
-        >
-          {testingDiscord ? "Sending test…" : "Test Discord notification"}
-        </button>
-        <span className="muted">
-          Email delivery requires a configured provider and may be quota
-          limited.
-        </span>
-      </div>
-      {message && <p className="preference-message">{message}</p>}
-    </section>
-  );
-}
-function AssignmentRow({
-  assignment: a,
-  course,
-  imported,
-  importTask,
-  onError,
-  timezone,
-}: {
-  assignment: Assignment;
-  course: string;
-  imported: boolean;
-  importTask: () => void;
-  onError: (s: string) => void;
-  timezone: string;
-}) {
-  const [due, setDue] = useState(
-    a.personal_due_at
-      ? zonedInputValue(a.personal_due_at, timezone)
-      : "",
-  );
-  const [saving, setSaving] = useState(false);
-  async function persist(value: string | null) {
-    const c = createClient();
-    if (!c) return;
-    const dueInstant = value ? wallTimeToUtc(value, timezone) : null;
-    if (dueInstant && !Number.isFinite(dueInstant.getTime())) {
-      onError("That time does not exist in your timezone because the clock changes. Choose another time.");
-      setDue(a.personal_due_at ? zonedInputValue(a.personal_due_at, timezone) : "");
-      return;
-    }
-    setSaving(true);
-    const result = await c
-      .from("assignments")
-      .update({
-        personal_due_at: dueInstant?.toISOString() || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", a.id);
-    setSaving(false);
-    if (result.error) onError(result.error.message);
-  }
-  return (
-    <tr>
-      <td>
-        <b>{a.personal_title || a.title}</b>
-        <small>{a.personal_description || a.description}</small>
-      </td>
-      <td>{course}</td>
-      <td>
-        {a.original_due_at
-          ? format(new Date(a.original_due_at), "MMM d, yyyy")
-          : "—"}
-        <small>Schoology source</small>
-      </td>
-      <td>
-        <input
-          className="inline-date"
-          aria-label={`Personal deadline for ${a.title}`}
-          type="datetime-local"
-          value={due}
-          onChange={(e) => setDue(e.target.value)}
-          onBlur={() => persist(due || null)}
-        />
-        {saving && <small>Saving…</small>}
-        <small>{a.personal_due_at ? "Personal override" : "Using Schoology date"}</small>
-        {a.personal_due_at && (
-          <button
-            className="text-button reset-deadline"
-            onClick={() => {
-              setDue("");
-              persist(null);
-            }}
-          >
-            Revert
-          </button>
         )}
-      </td>
-      <td>
-        {(a.personal_completed ?? a.original_completed) ? (
-          <span className="state complete">Completed</span>
-        ) : (
-          <span className="state pending">Upcoming</span>
-        )}
-      </td>
-      <td>
-        {imported ? (
-          <span className="state complete">In tasks</span>
-        ) : (
-          <button className="button subtle small-button" onClick={importTask}>
-            Import task
-          </button>
-        )}
-      </td>
-    </tr>
-  );
-}
-function CoursesView({
-  courses,
-  integration,
-  onRefresh,
-  toast,
-  error,
-  onSettings,
-}: {
-  courses: Course[];
-  integration: IntegrationState | null;
-  onRefresh: () => Promise<void>;
-  toast: (s: string) => void;
-  error: (s: string) => void;
-  onSettings: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("");
-  const connected = integration?.status === "connected";
-  async function sync() {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/integrations/schoology/sync", { method: "POST" });
-      const json = await res.json();
-      if (!res.ok) { setStatus(json.error || "Sync failed"); return; }
-      setStatus(`${json.itemsSeen} assignments checked`);
-      toast("Schoology sync complete");
-      await onRefresh();
-    } catch (failure) {
-      setStatus(failure instanceof Error ? failure.message : "Schoology sync failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function toggle(course: Course, key: "selected" | "auto_import") {
-    const c = createClient();
-    if (!c) return;
-    const result = await c
-      .from("courses")
-      .update({ [key]: !course[key], updated_at: new Date().toISOString() })
-      .eq("id", course.id);
-    if (result.error) error(result.error.message);
-    else await onRefresh();
-  }
-  async function disconnect() {
-    const res = await fetch("/api/integrations/schoology", {
-      method: "DELETE",
-    });
-    if (res.ok) {
-      setStatus("Disconnected. Existing imported data remains available.");
-      await onRefresh();
-    } else setStatus("Could not disconnect Schoology.");
-  }
-  return (
-    <>
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">ACADEMICS</div>
-          <h1>Courses</h1>
-          <p>Choose which classes Daymark should keep in sync.</p>
-        </div>
-        <div className="heading-actions">
-          <a
-            className="button subtle"
-            href="/api/integrations/schoology/connect"
-          >
-            {connected ? "Reconnect Schoology" : "Connect Schoology"}
-          </a>
-          <button className="button primary" disabled={busy || !connected} onClick={sync}>
-            {busy ? "Syncing…" : "Sync courses"}
-          </button>
-        </div>
-      </div>
-      <div className={`notice page-notice ${integration?.last_error ? "error" : connected ? "success" : "neutral"}`}>
-        <b>{connected ? "Schoology connected" : "Schoology not connected"}</b>
-        <span>{integration?.last_error || (integration?.last_synced_at ? `Last successful sync ${format(new Date(integration.last_synced_at), "MMM d, yyyy · h:mm a")}` : "No successful sync recorded")}</span>
-      </div>
-      {status && <div className={`notice page-notice ${/failed|error|could not/i.test(status) ? "error" : "success"}`}>{status}</div>}
-      {courses.length === 0 ? (
-        <Empty
-          icon={BookOpen}
-          title="Connect Schoology to add courses"
-          text="Course data is fetched from Schoology only after you authorize it. Consumer credentials and institutional API access are required."
-          action="Integration setup"
-          onAction={onSettings}
-        />
-      ) : (
-        <>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Course section</th>
-                  <th>Sync course</th>
-                  <th>Auto import assignments</th>
-                </tr>
-              </thead>
-              <tbody>
-                {courses.map((c) => (
-                  <tr key={c.id}>
-                    <td>
-                      <b>{c.name}</b>
-                      <small>Section {c.section_external_id || "—"}</small>
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={c.selected}
-                        onChange={() => toggle(c, "selected")}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={c.auto_import}
-                        onChange={() => toggle(c, "auto_import")}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <button className="text-button" onClick={disconnect}>
-            Disconnect Schoology (keep synced data)
-          </button>
-        </>
-      )}
-    </>
-  );
-}
-function SettingsView({
-  user,
-  integrations,
-  onTimezoneChange,
-  onSignOut,
-}: {
-  user: { id: string; email?: string } | null;
-  integrations: IntegrationState[];
-  onTimezoneChange: (timezone: string) => void;
-  onSignOut: () => void;
-}) {
-  const [theme, setTheme] = useState("dark");
-  const [timezone, setTimezone] = useState(
-    Intl.DateTimeFormat().resolvedOptions().timeZone,
-  );
-  const [displayName, setDisplayName] = useState(
-    user?.email?.split("@")[0] || "",
-  );
-  const [workdayStart, setWorkdayStart] = useState("09:00");
-  const [workdayEnd, setWorkdayEnd] = useState("17:00");
-  const [weekStartsOn, setWeekStartsOn] = useState(1);
-  const [saved, setSaved] = useState(false);
-  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
-  const [activeSettingsSection, setActiveSettingsSection] = useState("General");
-  const settingsSections = [
-    "General",
-    "Calendar",
-    "Appearance",
-    "Notifications",
-    "Integrations",
-    "Schoology",
-    "Discord",
-    "AI Planner",
-    "Account",
-  ];
-  const schoologyIntegration = integrations.find((item) => item.provider === "schoology");
-  const discordIntegration = integrations.find((item) => item.provider === "discord");
-  useEffect(() => {
-    if (!user?.id) return;
-    const c = createClient();
-    c?.from("user_preferences")
-      .select("theme,timezone,workday_start,workday_end,week_starts_on")
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          setTheme(data.theme);
-          setTimezone(data.timezone);
-          setWorkdayStart(data.workday_start.slice(0, 5));
-          setWorkdayEnd(data.workday_end.slice(0, 5));
-          setWeekStartsOn(data.week_starts_on);
-        }
-      });
-    c?.from("profiles")
-      .select("display_name")
-      .eq("id", user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data?.display_name) setDisplayName(data.display_name);
-      });
-    fetch("/api/ai/plan")
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Could not read AI provider status")))
-      .then((result: { configured: boolean }) => setAiConfigured(result.configured))
-      .catch(() => setAiConfigured(null));
-  }, [user?.id]);
-  useEffect(() => {
-    const applyTheme = (event: globalThis.Event) => {
-      const nextTheme = (event as CustomEvent<string>).detail;
-      if (nextTheme) setTheme(nextTheme);
-    };
-    window.addEventListener("daymark-theme", applyTheme);
-    return () => window.removeEventListener("daymark-theme", applyTheme);
-  }, []);
-  async function save() {
-    if (workdayEnd <= workdayStart) {
-      alert("Workday end must be after the start time.");
-      return;
-    }
-    const c = createClient();
-    const {
-      data: { user: u },
-    } = await c!.auth.getUser();
-    const { error } = await c!.from("user_preferences").upsert({
-      user_id: u?.id,
-      theme,
-      timezone,
-      workday_start: workdayStart,
-      workday_end: workdayEnd,
-      week_starts_on: weekStartsOn,
-    });
-    const profileResult = await c!
-      .from("profiles")
-      .update({ display_name: displayName })
-      .eq("id", u?.id);
-    if (error || profileResult.error)
-      alert(error?.message || profileResult.error?.message);
-    else {
-      setSaved(true);
-      onTimezoneChange(timezone);
-      window.dispatchEvent(new CustomEvent("daymark-theme", { detail: theme }));
-      localStorage.setItem("theme", theme);
-    }
-  }
-  async function deleteAccount() {
-    if (
-      !confirm(
-        "Permanently delete your Daymark account and all of its data? This cannot be undone.",
-      )
-    )
-      return;
-    const response = await fetch("/api/account", { method: "DELETE" });
-    if (response.ok) onSignOut();
-    else {
-      const result = await response.json().catch(() => ({}));
-      alert(result.error || "Account deletion failed.");
-    }
-  }
-  return (
-    <>
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">MAKE IT YOURS</div>
-          <h1>Settings</h1>
-          <p>Preferences for your Daymark workspace.</p>
-        </div>
-        <button className="button primary" onClick={save}>
-          {saved ? (
-            <>
-              <Check size={14} /> Saved
-            </>
-          ) : (
-            "Save changes"
-          )}
-        </button>
-      </div>
-      <div className="settings-layout">
-        <div className="settings-nav">
-          {settingsSections.map((name) => (
-            <button
-              type="button"
-              className={name === activeSettingsSection ? "selected" : ""}
-              aria-current={name === activeSettingsSection ? "location" : undefined}
-              key={name}
-              onClick={() => {
-                setActiveSettingsSection(name);
-                document
-                  .getElementById(`settings-${name.toLowerCase()}`)
-                  ?.scrollIntoView({
-                    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-                      ? "auto"
-                      : "smooth",
-                    block: "start",
-                  });
-              }}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-        <div className="settings-content">
-          <section className="settings-section" id="settings-general">
-            <div className="settings-section-head">
-              <h2>General</h2>
-              <p>Set the basics for how Daymark works for you.</p>
-            </div>
-            <label>
-              Display name
-              <input
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-              />
-            </label>
-            <label>
-              Timezone
-              <select
-                value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-              >
-                {[
-                  timezone,
-                  "UTC",
-                  "America/Los_Angeles",
-                  "America/New_York",
-                  "Europe/London",
-                ]
-                  .filter((x, i, a) => a.indexOf(x) === i)
-                  .map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-              </select>
-            </label>
-          </section>
-          <section className="settings-section" id="settings-calendar">
-            <div className="settings-section-head">
-              <h2>Calendar</h2>
-              <p>Set the regular working window for scheduling proposals.</p>
-            </div>
-            <div className="form-row settings-hours">
-              <label>
-                Workday starts
-                <input
-                  type="time"
-                  value={workdayStart}
-                  onChange={(e) => setWorkdayStart(e.target.value)}
-                />
-              </label>
-              <label>
-                Workday ends
-                <input
-                  type="time"
-                  value={workdayEnd}
-                  onChange={(e) => setWorkdayEnd(e.target.value)}
-                />
-              </label>
-            </div>
-            <label>
-              First day of week
-              <select
-                value={weekStartsOn}
-                onChange={(e) => setWeekStartsOn(Number(e.target.value))}
-              >
-                <option value={0}>Sunday</option>
-                <option value={1}>Monday</option>
-                <option value={6}>Saturday</option>
-              </select>
-            </label>
-          </section>
-          <section className="settings-section" id="settings-appearance">
-            <div className="settings-section-head">
-              <h2>Appearance</h2>
-              <p>Choose a comfortable working environment.</p>
-            </div>
-            <div className="theme-options">
-              <button
-                className={theme === "dark" ? "chosen" : ""}
-                onClick={() => setTheme("dark")}
-              >
-                <Moon size={16} /> Dark
-              </button>
-              <button
-                className={theme === "light" ? "chosen" : ""}
-                onClick={() => setTheme("light")}
-              >
-                <Sun size={16} /> Light
-              </button>
-              <button
-                className={theme === "system" ? "chosen" : ""}
-                onClick={() => setTheme("system")}
-              >
-                <Settings2 size={16} /> System
-              </button>
-            </div>
-          </section>
-          <section className="settings-section" id="settings-integrations">
-            <div className="settings-section-head">
-              <h2>Integrations</h2>
-              <p>
-                Connect optional services. Your core workspace works without
-                them.
-              </p>
-            </div>
-            <div className="integration-row" id="settings-schoology">
-              <span className="integration-icon">
-                <GraduationCap size={17} />
-              </span>
-              <span>
-                <b>Schoology</b>
-                <small>
-                  Course and assignment synchronization · API credentials
-                  required
-                </small>
-              </span>
-              <span className={`state ${schoologyIntegration?.last_error || schoologyIntegration?.status === "error" ? "error" : schoologyIntegration?.status === "connected" ? "complete" : "neutral"}`}>
-                {schoologyIntegration?.last_error || (schoologyIntegration?.status ? label(schoologyIntegration.status) : "Not connected")}
-              </span>
-              <a className="button subtle small-button" href="/api/integrations/schoology/connect">{schoologyIntegration?.status === "connected" ? "Reconnect" : "Connect"}</a>
-            </div>
-            <div className="integration-row" id="settings-ai-planner">
-              <span className="integration-icon"><Sparkles size={17} /></span>
-              <span><b>AI provider</b><small>Optional OpenAI-compatible endpoint; secrets stay on the server.</small></span>
-              <span className={`state ${aiConfigured ? "complete" : "neutral"}`}>{aiConfigured === null ? "Status unavailable" : aiConfigured ? "Configured" : "Not configured"}</span>
-              <span className="muted">Set AI_BASE_URL and AI_MODEL on the server.</span>
-            </div>
-            <div className="integration-row" id="settings-discord">
-              <span className="integration-icon">
-                <DiscordIcon size={17} />
-              </span>
-              <span>
-                <b>Discord</b>
-                <small>
-                  Link your Discord account for notifications and DMs.
-                </small>
-              </span>
-              <span className={`state ${discordIntegration?.status === "connected" ? "complete" : "neutral"}`}>{discordIntegration?.status ? label(discordIntegration.status) : "Not linked"}</span>
-              <a className="button subtle small-button" href="/api/integrations/discord/connect">{discordIntegration?.status === "connected" ? "Reconnect" : "Connect"}</a>
-            </div>
-            <div className="integration-row">
-              <span className="integration-icon">
-                <Bell size={17} />
-              </span>
-              <span>
-                <b>Browser notifications</b>
-                <small>Web Push support and permission</small>
-              </span>
-              <button
-                className="button subtle small-button"
-                disabled={typeof window !== "undefined" && !("Notification" in window)}
-                onClick={() => { if (!("Notification" in window)) return; void Notification.requestPermission(); }}
-              >
-                Enable
-              </button>
-            </div>
-          </section>
-          <section className="settings-section" id="settings-notifications">
-            <div className="settings-section-head"><h2>Notifications</h2><p>Choose delivery channels and reminder timing.</p></div>
-            <NotificationPreferences />
-          </section>
-          <section className="settings-section" id="settings-account">
-            <div className="settings-section-head">
-              <h2>Account</h2>
-              <p>Signed in as {user?.email}</p>
-            </div>
-            <button className="button danger-outline" onClick={onSignOut}>
-              <LogOut size={15} /> Sign out
-            </button>
-            <button className="button danger-outline" onClick={deleteAccount}>
-              Delete account and data
-            </button>
-          </section>
-        </div>
       </div>
     </>
   );
 }
-
-function DiscordIcon({ size = 16, style }: { size?: number; style?: React.CSSProperties }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-      fill="currentColor"
-      aria-label="Discord"
-      style={style}
-    >
-      <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
-    </svg>
-  );
-}
-
 function NotificationKindIcon({ kind }: { kind: string }) {
   const icons: Record<string, React.ElementType> = {
     assignment: GraduationCap,

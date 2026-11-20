@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daymark for Schoology</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script type="module" src="dist/popup/popup.js"></script>
+  </head>
+  <body>
+    <main class="popup-shell">
+      <header class="topbar">
+        <img class="brand-mark" src="public/daymark-icon.svg" alt="" />
+        <div class="brand-lockup">
+          <strong>daymark</strong><span>coursework bridge</span>
+        </div>
+        <button
+          id="settings-toggle"
+          class="icon-button"
+          type="button"
+          aria-label="Connection settings"
+          title="Connection settings"
+        >
+          ⚙
+        </button>
+      </header>
+
+      <section class="connection-row" aria-label="Connection status">
+        <span id="connection-dot" class="dot" aria-hidden="true"></span>
+        <span id="connection-label">Checking connection…</span>
+        <button id="open-daymark" class="text-button" type="button">
+          Open Daymark
+        </button>
+      </section>
+
+      <p id="last-sync" class="last-sync">Last sync: Never</p>
+
+      <section class="schoology-card">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">SCHOOLogy</p>
+            <h1>Your coursework</h1>
+          </div>
+          <button id="scan" class="button button--secondary" type="button">
+            Scan page
+          </button>
+        </div>
+        <p id="page-hint" class="page-hint" aria-live="polite">
+          Open a signed-in Schoology page to scan coursework.
+        </p>
+      </section>
+
+      <section class="content-section">
+        <div class="section-title">
+          <h2>Courses</h2>
+          <span>Detected on this page</span>
+        </div>
+        <ul id="course-list" class="course-list">
+          <li class="empty-row">
+            Scan a Schoology course page to see your courses.
+          </li>
+        </ul>
+      </section>
+
+      <section class="content-section assignments-section">
+        <div class="section-title">
+          <h2>Assignments</h2>
+          <span>Due date order</span>
+        </div>
+        <ul id="assignment-list" class="assignment-list">
+          <li class="empty-row">
+            Nothing imported until Schoology data is found.
+          </li>
+        </ul>
+      </section>
+
+      <div class="action-bar">
+        <p id="status" class="status" role="status" aria-live="polite">
+          Ready when you are.
+        </p>
+        <button id="sync" class="button button--primary" type="button" disabled>
+          Sync to Daymark
+        </button>
+      </div>
+
+      <section
+        id="settings-panel"
+        class="settings-panel"
+        hidden
+        aria-labelledby="settings-title"
+      >
+        <div class="settings-heading">
+          <div>
+            <p class="eyebrow">SETUP</p>
+            <h2 id="settings-title">Connect Daymark</h2>
+          </div>
+          <span class="secure-note">One-time code</span>
+        </div>
+        <label for="daymark-origin">Daymark address</label>
+        <input
+          id="daymark-origin"
+          type="url"
+          inputmode="url"
+          placeholder="https://your-daymark.example"
+          autocomplete="url"
+        />
+        <label for="schoology-host"
+          >Schoology host (custom school domains)</label
+        >
+        <input
+          id="schoology-host"
+          type="text"
+          inputmode="url"
+          placeholder="school.example.edu"
+          autocomplete="off"
+        />
+        <label for="pairing-code">Pairing code</label>
+        <input
+          id="pairing-code"
+          type="text"
+          inputmode="text"
+          autocomplete="one-time-code"
+          placeholder="Paste code from Daymark Settings"
+        />
+        <p class="privacy-copy">
+          The extension reads the Schoology page only when you choose Scan. It
+          stores a revocable Daymark token, never your Schoology password or
+          session cookies.
+        </p>
+        <div class="settings-actions">
+          <button
+            id="disconnect"
+            class="button button--secondary"
+            type="button"
+            hidden
+          >
+            Disconnect</button
+          ><button
+            id="save-settings"
+            class="button button--secondary"
+            type="button"
+          >
+            Save address</button
+          ><button id="connect" class="button button--primary" type="button">
+            Pair extension
+          </button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

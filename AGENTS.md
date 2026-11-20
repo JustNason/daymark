@@ -20,7 +20,7 @@ verbatim; everything below it is Daymark-owned.
    migration, dependency, or deployment changes into a docs reorganization —
    see [plans/IMPLEMENTATION_PLAN.md](plans/IMPLEMENTATION_PLAN.md).
 2. **Do not commit or push** unless the owner explicitly asks.
-3. **Never read or print secret values.** Refer to variable *names* only
+3. **Never read or print secret values.** Refer to variable _names_ only
    (`.env.example`, [docs/operations/ENVIRONMENT.md](docs/operations/ENVIRONMENT.md)).
 4. **Preserve the generated block above** (`<!-- BEGIN/END:nextjs-agent-rules -->`)
    byte-for-byte when editing this file.
@@ -29,7 +29,7 @@ verbatim; everything below it is Daymark-owned.
    changes are migration-only, additive where possible, and must update
    DATABASE.md in the same change.
 6. **RLS:** any new user-owned table must be added to the ownership list in
-   the migration *before* it is exposed — the `profiles` table was missed and
+   the migration _before_ it is exposed — the `profiles` table was missed and
    became a verified security gap ([docs/product/BACKLOG.md](docs/product/BACKLOG.md) S1).
 
 ## Documentation rules

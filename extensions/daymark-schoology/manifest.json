@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Daymark for Schoology",
+  "version": "0.1.0",
+  "description": "Bring coursework from your signed-in Schoology tab into Daymark.",
+  "action": {
+    "default_title": "Daymark for Schoology",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "dist/background/background.js",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "icons": {
+    "16": "public/daymark-icon-512.png",
+    "32": "public/daymark-icon-512.png",
+    "48": "public/daymark-icon-512.png",
+    "128": "public/daymark-icon-512.png"
+  }
+}

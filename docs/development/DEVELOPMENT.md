@@ -30,16 +30,16 @@ Local development workflow for Daymark. For a quick start see
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Dev server on `0.0.0.0:3000` |
-| `npm run build` | Production build |
-| `npm start` | Serve the production build |
-| `npm run typecheck` | `tsc --noEmit` (strict) |
-| `npm run lint` | ESLint flat config |
-| `npm run format` | Prettier write (defaults; no config file) |
-| `npm test` / `npm run test:watch` | Vitest unit tests |
-| `npm run test:e2e` | Playwright (spawns dev server on port 3100) |
+| Command                           | Purpose                                     |
+| --------------------------------- | ------------------------------------------- |
+| `npm run dev`                     | Dev server on `0.0.0.0:3000`                |
+| `npm run build`                   | Production build                            |
+| `npm start`                       | Serve the production build                  |
+| `npm run typecheck`               | `tsc --noEmit` (strict)                     |
+| `npm run lint`                    | ESLint flat config                          |
+| `npm run format`                  | Prettier write (defaults; no config file)   |
+| `npm test` / `npm run test:watch` | Vitest unit tests                           |
+| `npm run test:e2e`                | Playwright (spawns dev server on port 3100) |
 
 ## Quality checks before pushing
 
@@ -47,18 +47,33 @@ Local development workflow for Daymark. For a quick start see
 npm run lint && npm run typecheck && npm test && npm run build
 ```
 
-Known current gaps (see [TESTING.md](TESTING.md)): `prettier --check` fails on
-10 files, and e2e covers only a login-page smoke test. Do not treat a green
-`npm test` as broad coverage.
+Known current gaps (see [TESTING.md](TESTING.md)): end-to-end coverage still
+checks only the login screen; no authenticated workspace journey or CI result
+has been observed. Do not treat a green `npm test` as broad coverage.
+
+### Schoology extension
+
+The extension has its own dependencies and build, separate from Next.js:
+
+```bash
+npm --prefix extensions/daymark-schoology install
+npm --prefix extensions/daymark-schoology run check
+```
+
+For installation, permissions, unpacked loading, pairing, and fixture-test
+limitations, follow
+[`extensions/daymark-schoology/README.md`](../../extensions/daymark-schoology/README.md).
 
 ## Project layout (code)
 
 ```text
 src/app/                 Next.js App Router pages and API route handlers
-src/app/app/page.tsx     The entire workspace UI (single ~3,300-line file)
-src/app/globals.css      All design tokens + styles (~2,400 lines)
+src/app/app/page.tsx     Workspace shell and data coordination
+src/app/globals.css      Design tokens and application styles
+src/components/          Shared workflow views and UI primitives
 src/lib/supabase/        client (browser), server (SSR cookies), admin (service role)
-src/lib/                 scheduler, timezone helpers, integration clients, crypto
+src/lib/                 scheduler, timezone helpers, integration clients, AI helpers
+extensions/daymark-schoology/ Standalone Manifest V3 TypeScript extension
 supabase/migrations/     SQL schema + RLS (source of truth for the database)
 supabase/cron/           Supabase Cron job SQL for notification delivery
 supabase/tests/          RLS isolation SQL test (manual)

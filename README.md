@@ -10,11 +10,22 @@ Daymark is a dark-first personal productivity workspace for tasks, projects, cal
 - Task board with drag and drop between workflow statuses; calendar month/week/day/agenda views; project creation; deterministic schedule proposals with explicit approval.
 - Schoology, AI, Discord, browser push, and email settings are setup-aware; external provider delivery still requires credentials and live verification.
 
-This is an active implementation, not a claim that every external integration has been verified. As of 2026-11-17: Schoology is **broken** (OAuth method mismatch), Discord linking is **broken from the preview host** (redirect host mismatch) and delivery is unverified, and no AI provider is configured. Full status: [docs/operations/INTEGRATIONS.md](docs/operations/INTEGRATIONS.md). Test coverage reality: [docs/development/TESTING.md](docs/development/TESTING.md).
+This is an active implementation, not a claim that every external integration has been verified. The Schoology OAuth/API path has been retired in favor of the Daymark browser extension; fixture coverage passes, but compatibility with a real authenticated institution account is not verified. Discord code repairs are in place, but live linking and delivery are not verified. No AI provider is configured. Full status: [docs/operations/INTEGRATIONS.md](docs/operations/INTEGRATIONS.md). Test coverage reality: [docs/development/TESTING.md](docs/development/TESTING.md).
 
 ## Stack
 
 Next.js 16, React 19, strict TypeScript, Supabase Auth/PostgreSQL, Zod, date-fns, Lucide, next-themes, and hand-written CSS (design tokens in `src/app/globals.css`). Dependencies are pinned in `package.json`; the verified inventory — including installed-but-unused packages — is [docs/architecture/TECH_STACK.md](docs/architecture/TECH_STACK.md).
+
+## Brand identity
+
+Daymark uses the D-shaped clock mark and dark/light logo variants from the
+supplied identity package. Canonical brand and presentation assets are in
+`public/brand/`; `/favicon.ico`, `/daymark-icon.svg`,
+`/daymark-icon-light.svg`, and `/apple-touch-icon.png` serve browser and
+home-screen use. The brand palette is Ink `#111613`, Surface `#1A231E`, Sage
+`#8BAE96`, and Mist `#E5EBE5`. Logo selection and usage rules are documented
+in the [design system](docs/design/DESIGN_SYSTEM.md#brand-identity), which is
+the source of truth.
 
 ## Prerequisites
 
@@ -36,9 +47,11 @@ Without Supabase variables, the app displays setup instructions and does not pre
 
 ```text
 src/app/                 Next.js App Router UI and route handlers
-src/app/app/page.tsx     The entire workspace UI (single large client page)
+src/app/app/page.tsx     Workspace shell and data coordination
 src/app/globals.css      Design tokens and all styling
-src/lib/                 Supabase clients, scheduler, timezone, integrations, crypto
+src/components/          Shared task, calendar, coursework, settings views and UI primitives
+src/lib/                 Supabase clients, scheduler, timezone, integrations and AI helpers
+extensions/daymark-schoology/ Manifest V3 Schoology connector (see its README)
 supabase/migrations/     PostgreSQL schema, constraints, indexes, RLS
 supabase/cron/           Supabase Cron job SQL (notification delivery)
 supabase/tests/          RLS isolation SQL test (manual)

@@ -1,0 +1,15 @@
+{
+  "name": "@daymark/schoology-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Daymark's focused Schoology coursework connector",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-static.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "check": "npm run build && node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

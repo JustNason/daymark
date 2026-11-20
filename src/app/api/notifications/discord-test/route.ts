@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  discordTestPayload,
+  mapDiscordError,
+} from "@/lib/integrations/discord";
 
 export async function POST() {
   const supabase = await createClient();
@@ -38,7 +42,7 @@ export async function POST() {
     );
   if (!preferences?.discord_user_id)
     return NextResponse.json(
-      { error: "Enter your Discord user ID and save preferences first." },
+      { error: "Link your Discord account in Settings before sending a test." },
       { status: 400 },
     );
 
@@ -65,15 +69,8 @@ export async function POST() {
       cache: "no-store",
     });
     if (!dm.ok) {
-      return NextResponse.json(
-        {
-          error:
-            dm.status === 401
-              ? "Discord rejected the bot token. Check DISCORD_BOT_TOKEN in Vercel."
-              : `Discord could not open a DM (${dm.status}). Check the user ID and that the bot can message you.`,
-        },
-        { status: 502 },
-      );
+      const mapped = mapDiscordError(dm.status, await dm.text());
+      return NextResponse.json({ error: mapped.message }, { status: 502 });
     }
     const channel = (await dm.json()) as { id?: string };
     if (!channel.id)
@@ -90,23 +87,19 @@ export async function POST() {
           Authorization: `Bot ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          content:
-            "Daymark test notification — your Discord reminders are connected.",
-        }),
+        body: JSON.stringify(discordTestPayload()),
         cache: "no-store",
       },
     );
-    if (!sent.ok)
+    if (!sent.ok) {
+      const mapped = mapDiscordError(sent.status, await sent.text());
       return NextResponse.json(
         {
-          error:
-            sent.status === 403
-              ? "Discord blocked the message. Check your DM privacy settings and try again."
-              : `Discord could not send the test message (${sent.status}).`,
+          error: mapped.message,
         },
         { status: 502 },
       );
+    }
 
     return NextResponse.json({ ok: true });
   } catch {

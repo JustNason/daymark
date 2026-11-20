@@ -1,8 +1,7 @@
 # Testing
 
-**Status legend used here:** the "Current status" section reports verified
-reality as of 2026-11-19; everything else is a **target**, not an achieved
-state.
+Database and deployment evidence is dated where measured. The continuation
+checks on 2026-11-19 are listed in the current status table.
 
 ## Commands
 
@@ -10,24 +9,31 @@ state.
 npm run typecheck   # tsc --noEmit (strict)
 npm test            # Vitest unit tests
 npm run build       # production build
-npm run lint        # ESLint (flat config, passes clean today)
+npm run lint        # ESLint
 npm run test:e2e    # Playwright (chromium + Pixel 7 against a dev server)
 ```
 
 ## Current status (verified)
 
-| Layer | What exists | Notes |
-| --- | --- | --- |
-| Unit | 6 tests: `tests/scheduling.test.ts` (4 — deadline priority, session splitting, busy-period avoidance, working hours, empty range, timezone/DST) and `tests/timezone.test.ts` (2 — wall-time round-trips, 23/25-hour DST days) | Real coverage of the deterministic scheduler |
-| Integration | **None** | No test exercises persistence, auth, or API routes |
-| End-to-end | 1 smoke test: `tests/e2e/setup.spec.ts` asserts the `/login` page renders controls | No login or authenticated flow is performed |
-| Database / RLS | `supabase/tests/rls_isolation.sql` covers profiles, projects, subtasks, composite ownership, profile bootstrap, and queue-function ACLs; it runs in a transaction and rolls back | **Passed 2026-11-19** on disposable Supabase project DaymarkTest (`nctorjcauabycyzdmxxy`); production migration applied with approval and metadata verified |
-| Production browser regression | Deployed login, workspace, Settings load, owner-filtered profile request, unchanged Settings save, and console | **Passed 2026-11-19** on production commit `fc96685` using the designated test account; mobile viewport capture unavailable in Browser MCP |
-| CI | **None** | No `.github/`, no pipelines; nothing runs automatically on push |
-| Coverage reporting | **None** | No coverage config |
+| Layer                         | What exists                                                                                                                 | Notes                                                                                                                                                            |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit                          | 42 tests in 8 files                                                                                                         | Scheduler/timezone, auth response handling, AI provider/context/rate limits, integrations and Schoology sync normalization; no DB-backed route integration tests |
+| Integration                   | **None**                                                                                                                    | No test exercises persistence, auth, or API routes                                                                                                               |
+| End-to-end                    | 1 smoke test in desktop Chromium and Pixel 7 profiles asserts the `/login` page renders controls                            | No login or authenticated flow is performed                                                                                                                      |
+| Database / RLS                | Existing isolation SQL covers profiles, projects, subtasks, composite ownership, profile bootstrap, and queue-function ACLs | Passed 2026-11-19 for migrations 0001/0002 on disposable DaymarkTest; new 0004 extension RLS remains unverified                                                  |
+| Production browser regression | Deployed login, workspace, Settings load, owner-filtered profile request, unchanged Settings save, and console              | **Passed 2026-11-19** on production commit `fc96685` using the designated test account; mobile viewport capture unavailable in Browser MCP                       |
+| CI                            | GitHub Actions workflow added                                                                                               | Includes app checks, extension checks/build, production build, Prettier and Playwright against production build; workflow result remains unobserved              |
+| Coverage reporting            | **None**                                                                                                                    | No coverage config                                                                                                                                               |
 
-Prettier: 10 files currently fail `prettier --check` (no Prettier config file
-exists, so defaults apply). ESLint passes clean.
+Prettier configuration and ignore rules are checked in. On 2026-11-19, lint,
+typecheck, 42 unit tests, extension build/fixture test, Prettier, Webpack
+production build (`npx next build --webpack`), and production-build browser
+smoke tests passed. The default Turbopack `npm run build` repeatedly failed in
+this environment because its CSS worker could not bind a local port (`EPERM`);
+the same code compiled and generated routes in Webpack mode. Lint reports four
+Lint completed without warnings after branding images moved to `next/image`.
+CI remains unobserved.
+Migration 0004 has not been applied to a disposable database or production.
 
 ## Target coverage (charter)
 
@@ -90,18 +96,22 @@ The following is the coverage Daymark requires before trusting changes. It is
 
 The production deployment for commit `fc96685` reached Vercel **READY**; its
 build completed successfully, including TypeScript and static page generation.
-The local `npm run build` command remains blocked by the sandbox's restriction
-on Turbopack binding a port. The browser regression covered desktop only; no
-mobile screenshot was captured because Browser MCP exposes no viewport control.
+The local `npm run build` command remains blocked by the environment's
+restriction on Turbopack binding a worker port; Webpack build completed. The
+Playwright regression covers the unauthenticated login screen in desktop and
+mobile profiles only. Browser MCP confirmed the rendered login brand and no
+console errors, but authenticated dashboard settings, extension popup, and
+live integrations were not tested. `npm run test:e2e:prod` selects
+`next start`; CI has not yet been observed on GitHub.
 
 ### Integration-specific tests
 
-| Integration | Mocked tests (CI-safe) | Live verification (requires credentials) |
-| --- | --- | --- |
-| Discord | Request signing/URL construction, DM-channel payload, retry/dedupe logic, error mapping (401/403/50007) | Link a test account, send the in-app test DM, confirm receipt; record date/account |
-| AI | Prompt assembly, deterministic fallback when provider errors, output not trusted to mutate data | One real provider round-trip per configured endpoint |
-| Schoology | OAuth 1.0 signature vector tests, sync idempotency, personal-override preservation | Full course/assignment sync against a real institution account |
-| Push/Email | Subscription cleanup on 404/410; email payload construction | One real push/email per configured provider |
+| Integration | Mocked tests (CI-safe)                                                                                   | Live verification (requires credentials)                                                       |
+| ----------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Discord     | Request signing/URL construction, DM-channel payload, retry/dedupe logic, error mapping (401/403/50007)  | Link a test account, send the in-app test DM, confirm receipt; record date/account             |
+| AI          | Prompt assembly, deterministic fallback when provider errors, output not trusted to mutate data          | One real provider round-trip per configured endpoint                                           |
+| Schoology   | Rendered DOM fixture extraction, IDs/dates, duplicates, plus sync normalization/idempotency helper tests | Full extraction/sync against an authenticated institution account; no live compatibility claim |
+| Push/Email  | Subscription cleanup on 404/410; email payload construction                                              | One real push/email per configured provider                                                    |
 
 ## Mocked vs live — rules
 

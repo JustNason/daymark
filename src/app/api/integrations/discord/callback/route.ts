@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { discordRedirectUri } from "@/lib/integrations/discord";
 
 function returnToApp(request: Request, result: string) {
   const response = NextResponse.redirect(
@@ -37,9 +38,10 @@ export async function GET(request: Request) {
   const clientId = process.env.DISCORD_CLIENT_ID;
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
   if (!clientId || !clientSecret) return returnToApp(request, "not_configured");
-  const redirectUri =
-    process.env.DISCORD_REDIRECT_URI ||
-    new URL("/api/integrations/discord/callback", request.url).toString();
+  const redirectUri = discordRedirectUri(
+    request.url,
+    process.env.DISCORD_REDIRECT_URI,
+  );
 
   const supabase = await createClient();
   const {
@@ -102,6 +104,7 @@ export async function GET(request: Request) {
     const { error } = await supabase.from("notification_preferences").upsert({
       user_id: user.id,
       discord_user_id: discordUser.id,
+      discord_enabled: true,
     });
     if (error) {
       await supabase

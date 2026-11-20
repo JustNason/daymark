@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="240" viewBox="0 0 1000 240" fill="none">
+  <g transform="translate(22 28) scale(1.44)">
+    <rect x="4" y="4" width="120" height="120" rx="30" fill="#1a231e" stroke="#2d3931" stroke-width="1.5"/>
+    <path d="M39 27.5V100.5H61.5C82.3 100.5 98 84.7 98 64S82.3 27.5 61.5 27.5H39Z" stroke="#8bae96" stroke-width="7.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M64 45.5V64L79.5 73" stroke="#e5ebe5" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="64" cy="64" r="4.1" fill="#8bae96"/>
+  </g>
+  <text x="240" y="151" font-family="Inter, ui-sans-serif, Arial, sans-serif" font-size="104" font-weight="680" letter-spacing="-5.8" fill="#e5ebe5">daymark</text>
+</svg>

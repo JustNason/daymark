@@ -1,8 +1,8 @@
 # UI/UX Audit
 
-Audit of the existing Daymark interface. **No UI changes were made as part of
-this documentation effort** — this document records problems and recommended
-fixes only.
+Audit of the Daymark interface. The findings below record the original audit
+from 2026-11-17; the implementation record at the end tracks changes against
+current source.
 
 **Method:** static code audit of `src/app/app/page.tsx` (3,338 lines),
 `src/app/login/page.tsx`, `src/app/globals.css` (2,437 lines) plus live
@@ -20,7 +20,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 
 ## Findings
 
-### UI-01 — Calendar browsing corrupts the Today dashboard *(P1)*
+### UI-01 — Calendar browsing corrupts the Today dashboard _(P1)_
 
 - **Current behavior:** `loadCalendarRange` overwrites the shared
   `events`/`workSessions` state used by Today, the sidebar "Planned this week"
@@ -35,9 +35,9 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Affected:** `Workspace`, `CalendarView`, sidebar, Today section.
 - **Priority:** P1 · **Dependencies:** data-layer refactor (UI-18).
 
-### UI-02 — Overdue tasks are invisible on Today *(P1)*
+### UI-02 — Overdue tasks are invisible on Today _(P1)_
 
-- **Current behavior:** `todayTasks` matches only tasks due *today*;
+- **Current behavior:** `todayTasks` matches only tasks due _today_;
   `upcoming` filters `due_at >= now` (`page.tsx:426-439`). A task overdue from
   last week appears in neither "Due today" nor "Upcoming deadlines".
 - **Problem:** the most urgent work is excluded from the primary view.
@@ -48,7 +48,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Affected:** Today section, `Metric`, deadline list.
 - **Priority:** P1 · **Dependencies:** none.
 
-### UI-03 — Section state is not in the URL *(P1)*
+### UI-03 — Section state is not in the URL _(P1)_
 
 - **Current behavior:** navigation is `setSection(...)` only; the URL is read
   once on mount from `?section=` (`page.tsx:298-312`, verified — the only
@@ -66,7 +66,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Priority:** P1 · **Dependencies:** notification link migration if real
   routes are adopted.
 
-### UI-04 — Clicking a specific deadline does not open that deadline *(P1)*
+### UI-04 — Clicking a specific deadline does not open that deadline _(P1)_
 
 - **Current behavior:** each deadline row's click handler is
   `setSection("Tasks")` (`page.tsx:819`, verified) — identical to the panel's
@@ -80,7 +80,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Affected:** Today → Upcoming deadlines, task detail modal.
 - **Priority:** P1 · **Dependencies:** none.
 
-### UI-05 — Modals are not accessible dialogs *(P1)*
+### UI-05 — Modals are not accessible dialogs _(P1)_
 
 - **Current behavior:** `TaskDetailModal`/`CreateModal` close on backdrop
   `mousedown` only; no `role="dialog"`, no `aria-modal`, no focus trap, no
@@ -96,7 +96,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Affected:** both modals, all future dialogs.
 - **Priority:** P1 · **Dependencies:** shared component library (UI-18).
 
-### UI-06 — Calendar is create-only *(P1)*
+### UI-06 — Calendar is create-only _(P1)_
 
 - **Current behavior:** events render as non-interactive `<div>`s; only
   double-click/hover-`+` creation exists (`page.tsx:1736, 1741-1758`).
@@ -114,7 +114,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Priority:** P1 · **Dependencies:** UI-01 state isolation (schema already
   supports everything needed).
 
-### UI-07 — Failed task create/edit silently discards input *(P1)*
+### UI-07 — Failed task create/edit silently discards input _(P1)_
 
 - **Current behavior:** `createTask` reports errors and returns `undefined`
   (`page.tsx:313-328`, verified); `CreateModal.submit` closes the dialog
@@ -127,11 +127,11 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Affected:** `CreateModal`, `TaskDetailModal`, page error banner.
 - **Priority:** P1 · **Dependencies:** none.
 
-### UI-08 — Inconsistent timezone handling between task create and edit *(P1)*
+### UI-08 — Inconsistent timezone handling between task create and edit _(P1)_
 
 - **Current behavior:** creation parses `datetime-local` input in the profile
   timezone (`wallTimeToUtc`, `page.tsx:2138-2146`), but the edit modal
-  formats and saves in the *browser* timezone (`page.tsx:1823-1825, 1919`).
+  formats and saves in the _browser_ timezone (`page.tsx:1823-1825, 1919`).
   Most display formatting is browser-local while calendar/agenda use the
   profile timezone.
 - **Problem:** for users whose profile timezone ≠ browser timezone, opening
@@ -144,7 +144,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Affected:** task modals, `TaskCard`, list rows, assignment rows.
 - **Priority:** P1 · **Dependencies:** none.
 
-### UI-09 — Destructive actions have no confirmation or undo *(P1)*
+### UI-09 — Destructive actions have no confirmation or undo _(P1)_
 
 - **Current behavior:** task and project deletes execute immediately
   (`page.tsx:1533-1535, 994, 1042-1056`); only account deletion confirms.
@@ -158,7 +158,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Priority:** P1 · **Dependencies:** undo needs a re-insert/soft-delete
   window.
 
-### UI-10 — Settings that save but do nothing *(P1)*
+### UI-10 — Settings that save but do nothing _(P1)_
 
 - **Current behavior (each verified by grep):**
   - "First day of week" saves (`page.tsx:3064`) but every computation hardcodes
@@ -181,7 +181,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Priority:** P1 · **Dependencies:** summary generation logic for the
   daily/weekly summary toggles.
 
-### UI-11 — Global search only affects one section *(P1)*
+### UI-11 — Global search only affects one section _(P1)_
 
 - **Current behavior:** the topbar search feeds state consumed only by the
   Tasks section (`page.tsx:644-652, 421-425`). On Today/Calendar/Projects/
@@ -198,7 +198,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Priority:** P1 · **Dependencies:** global search needs an index over
   tasks/projects/events.
 
-### UI-12 — Toasts never auto-dismiss and are never announced *(P1)*
+### UI-12 — Toasts never auto-dismiss and are never announced _(P1)_
 
 - **Current behavior:** toast/error are plain strings with an X; no
   `setTimeout` exists anywhere in `src/`; no `aria-live`/`role="status"`
@@ -213,7 +213,7 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Affected:** page shell, `NotificationCenter`, `NotificationPreferences`.
 - **Priority:** P1 · **Dependencies:** shared toast primitive (UI-18).
 
-### UI-13 — Board drag-and-drop is mouse-only *(P2)*
+### UI-13 — Board drag-and-drop is mouse-only _(P2)_
 
 - **Current behavior:** native HTML5 DnD (`page.tsx:938-942, 972-975`); no
   keyboard equivalent in Board view (the List view `<select>` is the only
@@ -228,7 +228,8 @@ design language; [BACKLOG.md](../product/BACKLOG.md) for tracked work items.
 - **Priority:** P2 · **Dependencies:** board rewrite with dnd-kit.
 
 ### UI-14 — Notification rows force full page reloads and race their own
-read-state *(P2)*
+
+read-state _(P2)_
 
 - **Current behavior:** rows are raw `<a href>` (`page.tsx:2433-2438`) — Next
   only intercepts `next/link` — and `read(id)` fires async alongside the
@@ -242,7 +243,7 @@ read-state *(P2)*
 - **Affected:** `NotificationCenter`.
 - **Priority:** P2 · **Dependencies:** UI-03 URL scheme.
 
-### UI-15 — Mobile breakpoint mismatch: JS 640px vs CSS 760px *(P2)*
+### UI-15 — Mobile breakpoint mismatch: JS 640px vs CSS 760px _(P2)_
 
 - **Current behavior:** JS forces List/Agenda views at ≤640px
   (`page.tsx:190, 1590`) while the drawer/layout switch is at 760px
@@ -256,7 +257,7 @@ read-state *(P2)*
 - **Affected:** `Workspace`, `CalendarView`, layout media queries.
 - **Priority:** P2 · **Dependencies:** none.
 
-### UI-16 — Mobile topbar hides the notifications bell *(P2)*
+### UI-16 — Mobile topbar hides the notifications bell _(P2)_
 
 - **Current behavior:** at ≤760px all `.top-actions > .icon-button` are hidden
   except the theme toggle (`globals.css:2205-2210`); the bell uses that class.
@@ -269,7 +270,7 @@ read-state *(P2)*
 - **Affected:** topbar.
 - **Priority:** P2 · **Dependencies:** none.
 
-### UI-17 — Feedback and confirmations bypass the design system *(P2)*
+### UI-17 — Feedback and confirmations bypass the design system _(P2)_
 
 - **Current behavior:** Settings uses native `alert()`/`confirm()` for
   validation and account deletion (`page.tsx:3051, 3071, 3081`); the Save
@@ -285,7 +286,7 @@ read-state *(P2)*
 - **Affected:** `SettingsView`, `NotificationPreferences`.
 - **Priority:** P2 · **Dependencies:** shared Confirm/Toast components.
 
-### UI-18 — No shared component library *(P2 — structural root cause)*
+### UI-18 — No shared component library _(P2 — structural root cause)_
 
 - **Current behavior:** 16 inline components in one file; no `src/components/`
   directory; `DiscordIcon` duplicated verbatim in `login/page.tsx` and
@@ -299,10 +300,11 @@ read-state *(P2)*
   split the 3,338-line page into section components.
 - **Affected:** entire frontend.
 - **Priority:** P2 (elevated by dependencies: unlocks UI-05, UI-07, UI-12,
-  UI-17) · **Dependencies:** none (it *is* the dependency).
+  UI-17) · **Dependencies:** none (it _is_ the dependency).
 
 ### UI-19 — Accessibility: missing labels, color-only signals, silent live
-regions *(P2)*
+
+regions _(P2)_
 
 - **Current behavior:** icon-only buttons without `aria-label` (task delete
   `1533`, column `+` `950-955`, cell `+` `1756-1758`); `aria-label` placed on
@@ -318,10 +320,10 @@ regions *(P2)*
 - **Affected:** task cards, board, calendar, view switchers.
 - **Priority:** P2 · **Dependencies:** none.
 
-### UI-20 — One contrast pair fails WCAG AA *(P2)*
+### UI-20 — One contrast pair fails WCAG AA _(P2)_
 
 - **Current behavior:** computed from live tokens: dark `--text-muted
-  #829087` on `--surface-elevated #222d26` = **4.27:1** (needs 4.5:1) —
+#829087` on `--surface-elevated #222d26` = **4.27:1** (needs 4.5:1) —
   occurs in modal helper text, toasts, account popover, quick-action meta.
   Light `--text-muted` on `--bg` = 4.51:1 (marginal). All other audited pairs
   pass (dark primary 15.1:1, secondary 7.7:1, accent 6.6:1).
@@ -334,7 +336,8 @@ regions *(P2)*
 - **Priority:** P2 · **Dependencies:** none.
 
 ### UI-21 — No optimistic updates; every mutation triggers a 9-query
-reload *(P2)*
+
+reload _(P2)_
 
 - **Current behavior:** `reload()` runs nine queries in parallel and every
   mutation awaits it (`page.tsx:196-248, 327, 1335, 1364`); board drags wait
@@ -349,7 +352,7 @@ reload *(P2)*
 - **Affected:** all mutations.
 - **Priority:** P2 · **Dependencies:** UI-18/data layer.
 
-### UI-22 — Dead framework/decorator weight *(P2)*
+### UI-22 — Dead framework/decorator weight _(P2)_
 
 - **Current behavior:** Tailwind v4 imported but **zero utility classes are
   used in any JSX** and no `@apply` exists — styling is 100% hand-written CSS;
@@ -367,7 +370,7 @@ reload *(P2)*
 - **Affected:** build config, `package.json`, README stack claims.
 - **Priority:** P2 · **Dependencies:** component-library decision (UI-18).
 
-### UI-23 — Copy and metric mismatches *(P3)*
+### UI-23 — Copy and metric mismatches _(P3)_
 
 - **Current behavior:** metric labeled "In progress" counts events + work
   sessions, not tasks; greeting uses browser time, not profile timezone;
@@ -385,7 +388,7 @@ reload *(P2)*
 - **Affected:** Today, AI Planner, Assignments, sidebar.
 - **Priority:** P3 · **Dependencies:** proposal history needs a read query.
 
-### UI-24 — No loading skeletons or motion craft *(P3)*
+### UI-24 — No loading skeletons or motion craft _(P3)_
 
 - **Current behavior:** loading states are text lines ("Preparing your
   workspace…", "Loading notifications…"); the only `@keyframes` in 2,437 lines
@@ -400,7 +403,7 @@ reload *(P2)*
 - **Affected:** all views.
 - **Priority:** P3 · **Dependencies:** none.
 
-### UI-25 — Minor navigation dead-ends *(P3)*
+### UI-25 — Minor navigation dead-ends _(P3)_
 
 - **Current behavior:** unauthenticated `/app` flashes a loading state before a
   client-side redirect (no `middleware.ts`); project cards are not
@@ -432,13 +435,69 @@ flows with Google/Discord OAuth buttons and themed brand marks **[live]**.
 
 ## Priority summary
 
-| Priority | Findings |
-| --- | --- |
-| P1 (correctness & trust) | UI-01 … UI-12 |
+| Priority                    | Findings      |
+| --------------------------- | ------------- |
+| P1 (correctness & trust)    | UI-01 … UI-12 |
 | P2 (structure & compliance) | UI-13 … UI-22 |
-| P3 (craft) | UI-23 … UI-25 |
+| P3 (craft)                  | UI-23 … UI-25 |
 
 Sequencing note: UI-18 (component library) is not the most severe finding but
 it is the highest-leverage one — five P1/P2 findings are blocked on it. The
 staged plan in [`plans/IMPLEMENTATION_PLAN.md`](../../plans/IMPLEMENTATION_PLAN.md)
 reflects this.
+
+## Implementation record — 2026-11-19
+
+Implemented in the current UI workstream:
+
+- **UI-01:** calendar browse data now has separate `calendarEvents` and
+  `calendarWorkSessions` state; Today continues to use the dashboard data
+  (`src/app/app/page.tsx:173-174, 1144-1145`).
+- **UI-02:** Today shows an overdue metric and the deadline list includes
+  past-due tasks, sorted by due date (`src/app/app/page.tsx:462-470,
+752-758, 844-867`).
+- **UI-03:** section navigation writes `?section=` to browser history and
+  restores the selected section on Back/Forward
+  (`src/app/app/page.tsx:319-333`).
+- **UI-04:** clicking a deadline opens that task's detail modal
+  (`src/app/app/page.tsx:856-859`).
+- **UI-05:** shared `Modal` supplies dialog semantics, initial focus, focus
+  trapping, Escape handling, backdrop close, and focus restoration
+  (`src/components/Modal.tsx:5-29`).
+- **UI-07:** task create/edit and event/project create keep their dialogs open
+  after persistence errors (`src/app/app/page.tsx:355-377, 1948-1966,
+2183-2237`).
+- **UI-08:** task edit inputs now convert both directions through the profile
+  timezone (`src/app/app/page.tsx:1859-1860, 1954-1955`).
+- **UI-09:** task and project deletion now require an in-app confirmation
+  (`src/app/app/page.tsx:382-395, 1428-1433`).
+- **UI-11:** the search control identifies task scope, switches to Tasks when
+  used, and supports ⌘K/Ctrl+K focus (`src/app/app/page.tsx:338-345,
+680-687`).
+- **UI-12:** success feedback uses a dismissible four-second toast with a
+  polite live region (`src/components/Toast.tsx:7-10`).
+- **UI-18 (partial):** shared `Button`, `IconButton`, `Modal`, and `Toast`
+  primitives now live under `src/components/`.
+- **UI-20:** dark muted text was raised to `#929e95`; **UI-24 (partial):**
+  modal and toast entrances use the existing motion token and the existing
+  reduced-motion override remains in force (`src/app/globals.css:14,
+1991-2010, 2390-2399`).
+- **UI-15:** JS responsive view switching now matches the 760px CSS layout
+  breakpoint (`src/app/app/page.tsx:197, 1654`).
+
+Still open: UI-13 (keyboard/touch board movement),
+UI-14 (notification navigation and read race), UI-16 (mobile notifications
+visibility), UI-17 (remaining native dialogs and duplicated preference
+state), UI-18 (feature-level extraction and broader primitives), UI-19
+(remaining semantic labels), UI-21 (targeted/optimistic data updates),
+UI-22 (dependency decision), and the remaining P3 findings. UI-06 now has
+event edit/delete and planned-session done/skip actions in Calendar. Assignment
+completion and ignore/restore actions are available in Coursework; ignored
+coursework is excluded from calendar planning and can be restored from the
+Assignments view. Today now explains its displayed schedule from actual events,
+work sessions, and task deadlines; Calendar can explain the currently visible
+range. Both require an explicit per-request checkbox before external-provider
+sharing. UI-10 is addressed by removing unsupported summary controls and wiring
+the supported notification preferences, assignment completion, and
+ignore/restore actions. The P1 fixes have not had an authenticated browser
+journey run, so the source audit is not a substitute for that verification.

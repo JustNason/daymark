@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { discordRedirectUri } from "@/lib/integrations/discord";
 
 export async function GET(request: Request) {
   const supabase = await createClient();
@@ -16,9 +17,10 @@ export async function GET(request: Request) {
     );
   }
 
-  const redirectUri =
-    process.env.DISCORD_REDIRECT_URI ||
-    new URL("/api/integrations/discord/callback", request.url).toString();
+  const redirectUri = discordRedirectUri(
+    request.url,
+    process.env.DISCORD_REDIRECT_URI,
+  );
   const state = randomBytes(32).toString("base64url");
   const authorize = new URL("https://discord.com/oauth2/authorize");
   authorize.searchParams.set("client_id", clientId);

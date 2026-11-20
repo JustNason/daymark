@@ -46,7 +46,9 @@ export const zonedInputValue = (instant: string, timezone: string) => {
     minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(new Date(instant));
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const value = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
   return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}`;
 };
 

@@ -24,13 +24,27 @@ export default function ConfirmResetPage() {
   }
   return (
     <main className="reset-screen">
-      <div className="brand-mark"><CalendarDays size={21} /></div>
+      <div className="brand-mark">
+        <CalendarDays size={21} />
+      </div>
       <div className="eyebrow">ACCOUNT RECOVERY</div>
       <h1>Choose a new password</h1>
       <p className="muted">Use at least eight characters.</p>
       <form className="stack" onSubmit={submit}>
-        <label>New password<input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-        <button className="button primary full" disabled={busy}>{busy ? "Updating…" : "Update password"}</button>
+        <label>
+          New password
+          <input
+            type="password"
+            autoComplete="new-password"
+            minLength={8}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+        <button className="button primary full" disabled={busy}>
+          {busy ? "Updating…" : "Update password"}
+        </button>
       </form>
       {error && <div className="notice error">{error}</div>}
     </main>

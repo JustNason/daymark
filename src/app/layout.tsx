@@ -5,8 +5,20 @@ export const metadata: Metadata = {
   title: "Daymark — Make room for what matters",
   description: "A calm workspace for tasks, classes, projects, and time.",
   icons: {
-    icon: "/daymark-icon.svg",
-    shortcut: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      {
+        url: "/daymark-icon.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: dark)",
+      },
+      {
+        url: "/daymark-icon-light.svg",
+        type: "image/svg+xml",
+        media: "(prefers-color-scheme: light)",
+      },
+    ],
+    shortcut: "/daymark-icon.svg",
     apple: "/apple-touch-icon.png",
   },
 };

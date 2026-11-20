@@ -10,15 +10,15 @@ Production branch: `master`
 
 Observed by live endpoint checks on **2026-11-17** against `https://daymark-universeftc.vercel.app` (preview) and `https://daymark-virid-two.vercel.app` (production). Status labels below describe environment configuration only, not working integrations.
 
-| Variable(s)                        | Observed state                                                                                                                              |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Configured in both environments (app signs in and loads data) — **Implemented**                                                    |
-| `DISCORD_BOT_TOKEN`                | Configured in both environments (test endpoint passes the configuration check) — **Configuration required → partially verified**            |
-| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | Configured in both environments (OAuth authorize redirect starts) — **Partially implemented**                                      |
-| `DISCORD_REDIRECT_URI`             | Preview environment points at `https://daymark-virid-two.vercel.app/...` (production host) — **Broken** from the preview host; production matches its own host |
-| `SCHOOLOGY_CONSUMER_KEY`, `SCHOOLOGY_CONSUMER_SECRET` | Configured in both environments (connect endpoint passes the configuration check) — **Broken** (API returns 405, see [INTEGRATIONS.md](INTEGRATIONS.md)) |
-| `AI_BASE_URL`, `AI_MODEL`          | Not configured in either environment (`GET /api/ai/plan` reports `configured: false`) — deterministic planner only                            |
-| `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, VAPID, `EMAIL_*` | **Not verified** from outside; behavior not distinguishable without invoking privileged or destructive paths                |
+| Variable(s)                                                  | Observed state                                                                                                                                                                                                 |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`  | Configured in both environments (app signs in and loads data) — **Implemented**                                                                                                                                |
+| `DISCORD_BOT_TOKEN`                                          | Configured in both environments (test endpoint passes the configuration check) — **Configuration required → partially verified**                                                                               |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`                 | Configured in both environments (OAuth authorize redirect starts) — **Partially implemented**                                                                                                                  |
+| `DISCORD_REDIRECT_URI`                                       | A prior probe found the preview value pointed at production; current code falls back to the request host when the configured origin does not match. OAuth callback registration still needs live verification. |
+| Retired Schoology OAuth variables                            | No longer read by the application; extension requires no Schoology credentials                                                                                                                                 |
+| `AI_BASE_URL`, `AI_MODEL`                                    | Not configured in either environment (`GET /api/ai/plan` reports `configured: false`) — deterministic planner only                                                                                             |
+| `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, VAPID, `EMAIL_*` | **Not verified** from outside; behavior not distinguishable without invoking privileged or destructive paths                                                                                                   |
 
 Two live deployments exist: `daymark-virid-two.vercel.app` (public; cron route reachable) and `daymark-universeftc.vercel.app` (behind Vercel Deployment Protection — non-browser requests get a Vercel SSO redirect). Environment variables are scoped per deployment environment, so verify each host separately. Do not add empty values or example placeholders. A missing optional variable keeps that feature disabled while the core app remains usable.
 
@@ -67,18 +67,9 @@ To enable scheduled reminders:
 
 Daymark checks the `Authorization: Bearer <CRON_SECRET>` header itself. Vercel also currently protects the project's non-custom domains with Vercel Authentication. If that protection blocks Supabase Cron before the request reaches Daymark, use a custom domain that is excluded from that protection for the Cron URL, or configure a Vercel protection bypass for the job. Keep Daymark's `CRON_SECRET` check enabled either way. See [Supabase Cron](https://supabase.com/docs/guides/cron) and [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection).
 
-## Schoology (optional)
+## Schoology extension
 
-Only configure these after the institution or Schoology has approved the API application. Daymark uses Schoology's OAuth 1.0 API; it does not use a Schoology password.
-
-| Variable                     | Value source                                                                                               | Environments                                                 |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `SCHOOLOGY_CONSUMER_KEY`     | Schoology API app registration                                                                             | Production; Preview/Development only for integration testing |
-| `SCHOOLOGY_CONSUMER_SECRET`  | Schoology API app registration                                                                             | Same environments as the consumer key; sensitive             |
-| `SCHOOLOGY_CALLBACK_URL`     | Exact callback registered with Schoology, e.g. `https://<your-domain>/api/integrations/schoology/callback` | Match the environment being tested                           |
-| `INTEGRATION_ENCRYPTION_KEY` | Generate a new key with `openssl rand -base64 32`                                                          | Production; use a separate key for Preview/Development       |
-
-`INTEGRATION_ENCRYPTION_KEY` must decode to exactly 32 bytes. Keep the same key for the lifetime of stored Schoology credentials; changing it makes existing encrypted credentials unreadable and requires reconnecting the integration. Local development can use `http://localhost:3000/api/integrations/schoology/callback`. Read [INTEGRATIONS.md](INTEGRATIONS.md) before setup; API access and institutional approval may be required.
+The browser extension pairing and synchronization require no Schoology API credentials or new environment variables. The retired Schoology OAuth variables may be removed from Vercel after confirming they are not referenced by another deployment. They are no longer consumed by Daymark source.
 
 ## AI planner (optional)
 
@@ -138,14 +129,12 @@ Keep these server-only and sensitive:
 
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `CRON_SECRET`
-- `SCHOOLOGY_CONSUMER_SECRET`
-- `INTEGRATION_ENCRYPTION_KEY`
 - `AI_API_KEY` (when used)
 - `DISCORD_BOT_TOKEN`
 - `VAPID_PRIVATE_KEY`
 - `EMAIL_API_KEY`
 
-Public/client values are `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`. `VAPID_PUBLIC_KEY` is read only by the server worker but is not secret. `EMAIL_FROM`, `AI_BASE_URL`, `AI_MODEL`, `VAPID_SUBJECT`, and `SCHOOLOGY_CALLBACK_URL` are configuration values rather than secrets.
+Public/client values are `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`. `VAPID_PUBLIC_KEY` is read only by the server worker but is not secret. `EMAIL_FROM`, `AI_BASE_URL`, `AI_MODEL`, `VAPID_SUBJECT` are configuration values rather than secrets.
 
 ## Local development
 

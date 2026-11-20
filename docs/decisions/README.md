@@ -18,9 +18,9 @@ Daymark as Architecture Decision Records (ADRs).
 
 ## Index
 
-| ADR | Title | Status |
-| --- | ----- | ------ |
-| — | No decisions recorded yet. | — |
+| ADR | Title                      | Status |
+| --- | -------------------------- | ------ |
+| —   | No decisions recorded yet. | —      |
 
 ## Decision backlog (candidates, not yet decided)
 

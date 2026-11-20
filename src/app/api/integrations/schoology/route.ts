@@ -1,26 +1,37 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/require-user";
+import { createAdminClient } from "@/lib/supabase/admin";
 export async function DELETE() {
-  const supabase = await createClient();
-  if (!supabase)
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  let db;
+  try {
+    db = createAdminClient();
+  } catch {
     return NextResponse.json(
-      { error: "Supabase is not configured" },
+      { error: "Schoology disconnect is unavailable" },
       { status: 503 },
     );
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user)
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const { error } = await supabase
+  }
+  const now = new Date().toISOString();
+  const { error: tokenError } = await db
+    .from("schoology_extension_tokens")
+    .update({ revoked_at: now })
+    .eq("user_id", auth.user.id)
+    .is("revoked_at", null);
+  const { error: integrationError } = await db
     .from("external_integrations")
     .update({
       status: "disconnected",
-      encrypted_credentials: null,
+      connected_at: null,
       last_error: null,
     })
+    .eq("user_id", auth.user.id)
     .eq("provider", "schoology");
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 400 });
+  if (tokenError || integrationError)
+    return NextResponse.json(
+      { error: "Could not disconnect Schoology" },
+      { status: 500 },
+    );
   return NextResponse.json({ ok: true });
 }

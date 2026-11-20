@@ -2,7 +2,7 @@
 
 **Status legend:** Implemented · Partially implemented · Broken · Configuration
 required · Not verified · Planned · Deprecated. Statements are facts from
-source unless explicitly marked *recommendation*.
+source unless explicitly marked _recommendation_.
 
 ## System overview
 
@@ -31,7 +31,7 @@ flowchart TD
 
     subgraph External["External providers (server-side secrets only)"]
         DIS["Discord API v10<br/>OAuth + bot DMs"]
-        SCH["Schoology API<br/>OAuth 1.0"]
+        SCH["Schoology tab<br/>visible DOM only"]
         AI["OpenAI-compatible endpoint<br/>(optional, unset today)"]
         RES["Resend (email, optional)"]
         VAP["Web Push services"]
@@ -44,7 +44,7 @@ flowchart TD
     API --> AUTH
     CRON --> PG
     API --> DIS
-    API --> SCH
+    SCH -->|"user scan + sync<br/>hashed extension token"| API
     API --> AI
     CRON --> DIS
     CRON --> RES
@@ -67,11 +67,11 @@ flowchart TD
 
 ### Supabase clients (three, strictly separated)
 
-| Client | File | Used by | Privilege |
-| --- | --- | --- | --- |
-| Browser | `src/lib/supabase/client.ts` | the workspace page | publishable key; **RLS applies** |
-| Server (SSR) | `src/lib/supabase/server.ts` | all session-authenticated API routes | publishable key + cookies; **RLS applies** |
-| Admin | `src/lib/supabase/admin.ts` | **only** `api/account` and `api/cron/notifications` | service role; **bypasses RLS** |
+| Client       | File                         | Used by                                             | Privilege                                  |
+| ------------ | ---------------------------- | --------------------------------------------------- | ------------------------------------------ |
+| Browser      | `src/lib/supabase/client.ts` | the workspace page                                  | publishable key; **RLS applies**           |
+| Server (SSR) | `src/lib/supabase/server.ts` | all session-authenticated API routes                | publishable key + cookies; **RLS applies** |
+| Admin        | `src/lib/supabase/admin.ts`  | **only** `api/account` and `api/cron/notifications` | service role; **bypasses RLS**             |
 
 All three return `null` when env vars are missing, and the UI degrades to
 setup instructions instead of showing fake data.
@@ -93,7 +93,7 @@ setup instructions instead of showing fake data.
    fields.
 6. Scheduled notification delivery: Supabase Cron → cron route (service role)
    → generate deduplicated notifications → claim deliveries (`FOR UPDATE SKIP
-   LOCKED`) → dispatch per channel with bounded retries; provider failures are
+LOCKED`) → dispatch per channel with bounded retries; provider failures are
    recorded in `notification_deliveries.last_error` without affecting the core
    app.
 
@@ -105,8 +105,8 @@ Route handlers are thin authentication shells around inline business logic
 - Every route calls `supabase.auth.getUser()` (session) except the cron route
   (shared-secret bearer).
 - **No rate limiting, no CSRF tokens** (mitigated by same-origin fetch +
-  SameSite cookies) — *recommendation: add rate limiting before public
-  signup.*
+  SameSite cookies) — _recommendation: add rate limiting before public
+  signup._
 - Only the cron route exports `runtime = "nodejs"`; no `maxDuration` exports.
 
 ## Integration architecture
@@ -117,10 +117,10 @@ integration: [INTEGRATIONS.md](../operations/INTEGRATIONS.md).
 
 - **Discord:** OAuth2 `identify` linking (state cookie bound to user id) +
   bot DM delivery from the cron worker. Requires `DISCORD_BOT_TOKEN`.
-- **Schoology:** hand-rolled OAuth 1.0 HMAC-SHA1 (`oauth-1.0a` is installed
-  but unused), encrypted token at rest, section/assignment sync with
-  sync logs. **Broken at the first step** (verified: server rejects POST;
-  see INTEGRATIONS.md).
+- **Schoology:** Manifest V3 browser extension reads rendered coursework
+  from the user's signed-in tab, then syncs through short-lived pairing and
+  revocable hashed tokens. Legacy OAuth connect/sync paths are retired; see
+  [INTEGRATIONS.md](../operations/INTEGRATIONS.md).
 - **AI:** one advisory endpoint (`/api/ai/plan`).
 - **Push/email:** delivery channels owned by the cron worker.
 
@@ -151,7 +151,7 @@ Key properties (verified):
   prompt are sent to the configured provider when AI is enabled.
 - **Dead schema:** `ai_conversations` and `ai_messages` are created in the
   migration but never read or written — there is no chat UI.
-- *Known defect:* the route does not check `typeof content === "string"`
+- _Known defect:_ the route does not check `typeof content === "string"`
   before using the model's response (`route.ts:150`) — a non-string payload
   can crash the UI render.
 
@@ -184,9 +184,10 @@ and BACKLOG):
   does not reset them).
 - `processing` rows have no reaper — a crashed run can wedge rows forever
   (verified: nothing in `src/` ever resets `processing`).
-- `in_app_enabled`, `daily_summary`, `weekly_summary` are stored but never
-  read by the worker; only `kind='task_due'` notifications exist.
-- Cron auth is a plain string comparison (not constant-time).
+- `in_app_enabled` is honored by the notification feed and unread badge.
+  `daily_summary` and `weekly_summary` remain unused schema fields and are not
+  offered as controls; only `kind='task_due'` notifications exist.
+- Cron auth uses a constant-time comparison after hashing both values to equal-length digests.
 
 ## State management
 
@@ -217,8 +218,9 @@ and BACKLOG):
   ownership constraints (`unique(user_id,id)` + composite FKs,
   migration:142-165) make cross-user attachments impossible even if a policy
   were bypassed.
-- OAuth consumer credentials, bot tokens, AI keys, VAPID private keys, email
-  keys, cron secrets, and `INTEGRATION_ENCRYPTION_KEY` are server-only.
+- Bot tokens, AI keys, VAPID private keys, email keys, and cron secrets are
+  server-only. Schoology uses extension tokens hashed server-side; the retired
+  OAuth consumer credentials are no longer read.
 - OAuth state: httpOnly, path-scoped, 10-minute cookies; Discord state is
   bound to the user id; Schoology state is HMAC-signed. Auth callback `next`
   is allowlisted (no open redirect).
@@ -243,10 +245,9 @@ not constant-time (see SECURITY.md and BACKLOG.md).
 
 ## Known architectural limits
 
-- **Monolith:** one 3,338-line client page + one 2,437-line stylesheet, no
-  `src/components/`. Root cause of most UI consistency findings; the single
-  highest-leverage refactor (see [UI_UX_AUDIT.md](../design/UI_UX_AUDIT.md)
-  UI-18).
+- **Large workspace module:** the client page has been reduced and shared
+  view/primitives live under `src/components/`, but data loading and much
+  application state remain in the page; further feature extraction is open.
 - **Thin service boundaries:** the sync worker (241 lines) and notification
   worker (313 lines) live inside route handlers; dedupe/retry/quiet-hours
   rules are untestable by the current unit suite.
